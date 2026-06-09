@@ -1,0 +1,16 @@
+{
+ "תרמוקיר pl 130 טיח רב תכליתי 25 ק ג": {
+  "query": "תרמוקיר PL 130 (טיח רב תכליתי) 25 ק\"ג",
+  "status": "approved",
+  "confidence": 1,
+  "permit": 45606,
+  "manufacturer": "תרמוקיר תעשיות (1980) בע\"מ  חורשים",
+  "matched_name": "תרמוקיר 130 PL",
+  "made_in_israel": true,
+  "mii_confidence": 1,
+  "official_url": "https://buyisrael.economy.gov.il/#/product/f8757d7e-3313-ee11-9119-005056bb57d3",
+  "mii_status": "confirmed",
+  "mii_matched_name": "תרמוקיר PL 130 (טיח רב תכליתי)",
+  "verified": true
+ }
+}

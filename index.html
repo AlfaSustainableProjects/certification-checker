@@ -1,0 +1,523 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>בדיקת תקן — Certification Checker</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Rubik:wght@500;600;700&family=Heebo:wght@400;500;700&display=swap" rel="stylesheet">
+<style>
+  :root{
+    --ink:#1b2430; --ink-soft:#586173; --line:#e3e0d8;
+    --paper:#f7f5ef; --card:#fffdf8; --shadow:rgba(27,36,48,.10);
+    --green:#1f7a4d; --green-bg:#e7f3ea; --green-line:#bfe0c9;
+    --amber:#a66a12; --amber-bg:#fbf0db; --amber-line:#ecd29a;
+    --red:#9a3b34;   --red-bg:#f6e6e3;   --red-line:#e3b9b2;
+    --blue:#0a4ea3;  --blue-bg:#e8f0fb;
+    --accent:#1b2430;
+  }
+  *{box-sizing:border-box}
+  body{
+    margin:0; font-family:"Heebo",sans-serif; color:var(--ink);
+    background:
+      radial-gradient(1200px 600px at 100% -10%, #fbfaf5 0%, transparent 60%),
+      var(--paper);
+    line-height:1.5; -webkit-font-smoothing:antialiased;
+  }
+  .wrap{max-width:880px; margin:0 auto; padding:0 20px 80px}
+
+  header{
+    padding:34px 0 26px; border-bottom:1px solid var(--line);
+    display:flex; align-items:flex-end; justify-content:space-between; gap:16px;
+  }
+  .brand h1{
+    font-family:"Rubik",sans-serif; font-weight:700; font-size:30px;
+    margin:0; letter-spacing:-.01em;
+  }
+  .brand p{margin:4px 0 0; color:var(--ink-soft); font-size:14px}
+  .mode{
+    font-family:"Rubik",sans-serif; font-size:12px; font-weight:600;
+    padding:6px 12px; border-radius:999px; white-space:nowrap;
+    border:1px solid var(--line); background:#fff; color:var(--ink-soft);
+  }
+  .mode.live{background:var(--green-bg); color:var(--green); border-color:var(--green-line)}
+  .mode.demo{background:var(--amber-bg); color:var(--amber); border-color:var(--amber-line)}
+
+  /* Drop zone */
+  .drop{
+    margin-top:26px; border:2px dashed #cfcabd; border-radius:16px;
+    background:var(--card); padding:34px 24px; text-align:center;
+    transition:border-color .15s, background .15s; cursor:pointer;
+  }
+  .drop:hover, .drop.over{border-color:var(--accent); background:#fffef9}
+  .drop .ic{font-size:30px}
+  .drop h2{font-family:"Rubik",sans-serif; font-size:18px; margin:10px 0 4px}
+  .drop p{margin:0; color:var(--ink-soft); font-size:14px}
+  .pick{
+    margin-top:14px; display:inline-block; font-family:"Rubik",sans-serif;
+    font-weight:600; font-size:14px; color:var(--accent);
+    border:1px solid var(--line); background:#fff; padding:8px 16px;
+    border-radius:10px;
+  }
+
+  .queue{margin-top:16px; display:flex; flex-wrap:wrap; gap:8px}
+  .chip{
+    display:flex; align-items:center; gap:8px; background:#fff;
+    border:1px solid var(--line); border-radius:10px; padding:6px 10px;
+    font-size:13px; color:var(--ink-soft);
+  }
+  .chip b{color:var(--ink); font-weight:500; max-width:200px; overflow:hidden;
+    text-overflow:ellipsis; white-space:nowrap}
+  .chip button{border:0; background:none; cursor:pointer; color:#b3271e;
+    font-size:16px; line-height:1; padding:0}
+
+  .actions{margin-top:20px; display:flex; align-items:center; gap:14px}
+  .btn{
+    font-family:"Rubik",sans-serif; font-weight:600; font-size:15px;
+    color:#fff; background:var(--accent); border:0; border-radius:11px;
+    padding:12px 26px; cursor:pointer; transition:transform .06s, opacity .15s;
+  }
+  .btn:hover{transform:translateY(-1px)}
+  .btn:disabled{opacity:.4; cursor:not-allowed; transform:none}
+  .btn.ghost{background:#fff; color:var(--accent); border:1px solid var(--line)}
+  .hint{color:var(--ink-soft); font-size:13px}
+
+  /* Summary */
+  .summary{display:none; margin-top:34px; gap:12px}
+  .summary.show{display:grid; grid-template-columns:repeat(3,1fr)}
+  .stat{
+    background:var(--card); border:1px solid var(--line); border-radius:14px;
+    padding:16px 18px; position:relative; overflow:hidden;
+  }
+  .stat::before{content:""; position:absolute; inset-inline-start:0; top:0; bottom:0; width:4px}
+  .stat.ok::before{background:var(--green)}
+  .stat.rv::before{background:var(--amber)}
+  .stat.no::before{background:var(--red)}
+  .stat .num{font-family:"Rubik",sans-serif; font-weight:700; font-size:30px; line-height:1}
+  .stat .lbl{color:var(--ink-soft); font-size:13px; margin-top:4px}
+  .stat.ok .num{color:var(--green)} .stat.rv .num{color:var(--amber)} .stat.no .num{color:var(--red)}
+
+  /* Results */
+  .results{margin-top:28px}
+  .receipt{margin-bottom:26px}
+  .receipt h3{
+    font-family:"Rubik",sans-serif; font-size:15px; font-weight:600;
+    color:var(--ink-soft); margin:0 0 10px; display:flex; gap:8px; align-items:center;
+  }
+  .receipt h3 .doc{font-size:16px}
+
+  .item{
+    background:var(--card); border:1px solid var(--line);
+    border-radius:14px; padding:16px 18px; margin-bottom:10px;
+    box-shadow:0 1px 2px var(--shadow);
+  }
+  .item.err{background:#fff}
+  .row1{display:flex; align-items:flex-start; gap:12px; justify-content:space-between}
+  .pname{font-weight:700; font-size:17px; flex:1; min-width:0}
+  .pname[contenteditable]{outline:none; border-radius:6px; padding:1px 4px}
+  .pname[contenteditable]:focus{background:#fffbe9; box-shadow:0 0 0 2px var(--amber-line)}
+
+  .pill{
+    font-family:"Rubik",sans-serif; font-weight:600; font-size:12.5px;
+    padding:5px 12px; border-radius:999px; white-space:nowrap; border:1px solid;
+  }
+  .pill.ok{color:var(--green); background:var(--green-bg); border-color:var(--green-line)}
+  .pill.rv{color:var(--amber); background:var(--amber-bg); border-color:var(--amber-line)}
+  .pill.no{color:var(--red);   background:var(--red-bg);   border-color:var(--red-line)}
+
+  .meta{margin-top:10px; display:flex; flex-wrap:wrap; gap:10px 18px; align-items:center;
+    font-size:13.5px; color:var(--ink-soft)}
+  .meta .k{color:var(--ink-soft)} .meta .v{color:var(--ink); font-weight:500}
+  .permit{
+    display:inline-flex; align-items:center; gap:7px; background:#fff;
+    border:1px solid var(--line); border-radius:8px; padding:3px 9px; cursor:pointer;
+    font-family:"Rubik",sans-serif; font-weight:600; color:var(--ink);
+  }
+  .permit:hover{border-color:var(--accent)}
+  .permit .c{font-size:12px; color:var(--ink-soft)}
+
+  .conf{margin-top:12px}
+  .conf .bar{height:6px; background:#eceae3; border-radius:99px; overflow:hidden}
+  .conf .fill{height:100%; border-radius:99px}
+  .conf .lbl{font-size:12px; color:var(--ink-soft); margin-top:4px}
+
+  .mii{
+    margin-top:12px; display:flex; align-items:center; gap:10px;
+    background:var(--blue-bg); border:1px solid #cfe0f5; border-radius:10px;
+    padding:9px 13px; font-size:13.5px;
+  }
+  .mii .flag{font-size:16px}
+  .mii b{font-family:"Rubik",sans-serif; color:var(--blue)}
+  .mii a{margin-inline-start:auto; color:var(--blue); font-weight:600; font-size:13px;
+    text-decoration:none; white-space:nowrap}
+  .mii a:hover{text-decoration:underline}
+  .mii.review{background:#fbf6ec; border-color:#ecd9b0}
+  .mii.review b{color:var(--amber, #a66a12)}
+
+  .editbar{margin-top:12px; display:none; gap:8px}
+  .editbar.show{display:flex}
+  .editbar button{font-family:"Rubik",sans-serif; font-weight:600; font-size:13px;
+    border-radius:9px; padding:7px 14px; cursor:pointer; border:1px solid var(--line)}
+  .editbar .save{background:var(--accent); color:#fff; border-color:var(--accent)}
+  .editbar .cancel{background:#fff; color:var(--ink-soft)}
+  .editbar input{flex:1; min-width:0; font-family:"Heebo",sans-serif; font-size:13.5px;
+    padding:7px 11px; border:1px solid var(--line); border-radius:9px; direction:rtl}
+
+  .confirmrow{margin-top:12px; display:flex; align-items:center; gap:10px; font-size:13.5px;
+    border-top:1px solid var(--line); padding-top:11px}
+  .confirmrow .ask{color:var(--ink-soft)}
+  .confirmrow.ok{color:var(--green); font-weight:600}
+  .vbtn{font-family:"Rubik",sans-serif; font-weight:600; font-size:13px; border-radius:9px;
+    padding:6px 13px; cursor:pointer; border:1px solid var(--line); background:#fff}
+  .vbtn.yes{color:var(--green); border-color:#bfe3cf}
+  .vbtn.no{color:var(--red); border-color:#f0c9c9}
+  .vbadge{font-family:"Rubik",sans-serif; font-size:11px; font-weight:700; color:#fff;
+    background:var(--green); border-radius:999px; padding:3px 9px; margin-inline-start:6px}
+  .editbar label{font-size:13px; display:flex; align-items:center; gap:5px; white-space:nowrap}
+
+  .linkbtn{border:0; background:none; color:var(--ink-soft); font-size:13px;
+    cursor:pointer; text-decoration:underline; padding:0}
+  .linkbtn:hover{color:var(--accent)}
+
+  footer{margin-top:40px; padding-top:18px; border-top:1px solid var(--line);
+    color:var(--ink-soft); font-size:12.5px; text-align:center}
+
+  .spinner{display:inline-block; width:15px; height:15px; border:2px solid #fff6;
+    border-top-color:#fff; border-radius:50%; animation:spin .7s linear infinite;
+    vertical-align:-2px; margin-inline-end:7px}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  .toast{position:fixed; bottom:24px; inset-inline-start:50%; transform:translateX(50%);
+    background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px;
+    font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50}
+  .toast.show{opacity:1}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <div class="brand">
+      <h1>בדיקת תקן</h1>
+      <p>בדיקת תו-תקן ותוצרת הארץ מתוך תעודות משלוח</p>
+    </div>
+    <span id="mode" class="mode">…</span>
+  </header>
+
+  <div id="drop" class="drop">
+    <div class="ic">📄</div>
+    <h2>גררו לכאן תעודות משלוח או חשבוניות</h2>
+    <p>תמונות (JPG / PNG) — אפשר כמה בבת אחת</p>
+    <span class="pick">בחרו קבצים</span>
+    <input id="file" type="file" accept="image/*" multiple hidden>
+  </div>
+
+  <div id="queue" class="queue"></div>
+
+  <div class="actions">
+    <button id="check" class="btn" disabled>בדיקה</button>
+    <span id="hint" class="hint"></span>
+  </div>
+
+  <div id="summary" class="summary">
+    <div class="stat ok"><div class="num" id="nOk">0</div><div class="lbl">מאושר — תו תקן</div></div>
+    <div class="stat rv"><div class="num" id="nRv">0</div><div class="lbl">לבדיקה ידנית</div></div>
+    <div class="stat no"><div class="num" id="nNo">0</div><div class="lbl">לא נמצא תקן</div></div>
+  </div>
+
+  <div id="results" class="results"></div>
+
+  <footer>
+    <span id="dbline"></span> · הקריאה מתבצעת דרך Claude API · ההתאמה והתקנים — מקומית
+  </footer>
+</div>
+<div id="toast" class="toast"></div>
+
+<script>
+const $ = s => document.querySelector(s);
+let MODE = "demo";
+let queued = [];   // {file, name}
+
+const STATUS = {
+  approved: {cls:"ok", label:"מאושר"},
+  review:   {cls:"rv", label:"לבדיקה"},
+  not_found:{cls:"no", label:"לא נמצא תקן"},
+};
+
+function toast(msg){
+  const t = $("#toast"); t.textContent = msg; t.classList.add("show");
+  clearTimeout(t._t); t._t = setTimeout(()=>t.classList.remove("show"), 1600);
+}
+
+// ---- status / db counts ----
+fetch("/api/status").then(r=>r.json()).then(s=>{
+  MODE = s.mode;
+  const m = $("#mode");
+  if(MODE==="live"){ m.textContent="● חי — קריאה אמיתית"; m.className="mode live"; }
+  else { m.textContent="● דמו — נתוני דוגמה"; m.className="mode demo"; }
+  $("#dbline").textContent =
+    `${s.databases.sii.toLocaleString()} מוצרים מתוקננים · ${s.databases.mii.toLocaleString()} מוצרי תוצרת הארץ`;
+  refreshButton();
+}).catch(()=>{ $("#mode").textContent="שגיאת חיבור לשרת"; });
+
+// ---- file intake ----
+const drop = $("#drop"), fileInput = $("#file");
+drop.addEventListener("click", ()=>fileInput.click());
+fileInput.addEventListener("change", e=>addFiles(e.target.files));
+["dragenter","dragover"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.add("over");}));
+["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
+drop.addEventListener("drop", e=>addFiles(e.dataTransfer.files));
+
+function addFiles(list){
+  for(const f of list){
+    if(f.type.startsWith("image/")) queued.push({file:f, name:f.name});
+  }
+  renderQueue(); refreshButton();
+}
+function renderQueue(){
+  $("#queue").innerHTML = queued.map((q,i)=>
+    `<span class="chip"><b title="${q.name}">${q.name}</b>
+       <button onclick="removeFile(${i})" title="הסר">×</button></span>`).join("");
+}
+window.removeFile = i => { queued.splice(i,1); renderQueue(); refreshButton(); };
+
+function refreshButton(){
+  const btn = $("#check");
+  if(MODE==="demo"){
+    btn.disabled = false;
+    $("#hint").textContent = queued.length
+      ? "במצב דמו הקבצים מתעלמים — תוצג תעודת דוגמה."
+      : "מצב דמו: לחצו ״בדיקה״ לתצוגת דוגמה.";
+  } else {
+    btn.disabled = queued.length === 0;
+    $("#hint").textContent = queued.length
+      ? `${queued.length} קבצים מוכנים לבדיקה`
+      : "הוסיפו תעודות כדי להתחיל.";
+  }
+}
+
+// ---- run check ----
+$("#check").addEventListener("click", async ()=>{
+  const btn = $("#check");
+  btn.disabled = true;
+  btn.innerHTML = `<span class="spinner"></span>קורא ובודק…`;
+  try{
+    const fd = new FormData();
+    queued.forEach(q=>fd.append("files", q.file, q.name));
+    const res = await fetch("/api/extract", {method:"POST", body:fd});
+    if(!res.ok){ throw new Error((await res.json()).error || res.statusText); }
+    const data = await res.json();
+    render(data.results);
+  }catch(err){
+    toast("שגיאה: " + err.message);
+  }finally{
+    btn.innerHTML = "בדיקה";
+    refreshButton();
+  }
+});
+
+// ---- render results ----
+function render(receipts){
+  let ok=0, rv=0, no=0;
+  receipts.forEach(r => (r.products||[]).forEach(p=>{
+    if(p.status==="approved") ok++; else if(p.status==="review") rv++; else no++;
+  }));
+  $("#nOk").textContent=ok; $("#nRv").textContent=rv; $("#nNo").textContent=no;
+  $("#summary").classList.add("show");
+
+  $("#results").innerHTML = receipts.map((r,ri)=>{
+    const items = (r.products||[]).map((p,pi)=>itemHTML(p,ri,pi)).join("");
+    const errLine = r.error ? `<div class="item err">לא ניתן לקרוא קובץ זה: ${r.error}</div>` : "";
+    return `<div class="receipt">
+        <h3><span class="doc">📄</span>${r.file||"תעודה"}</h3>
+        ${items || errLine || '<div class="item err">לא זוהו מוצרים בתעודה זו.</div>'}
+      </div>`;
+  }).join("");
+  window.__data = receipts;
+  $("#results").scrollIntoView({behavior:"smooth", block:"start"});
+}
+
+function pct(x){ return Math.round((x||0)*100); }
+function confColor(s){ return s==="approved"?"var(--green)":s==="review"?"var(--amber)":"var(--red)"; }
+
+function itemHTML(p, ri, pi){
+  const st = STATUS[p.status] || STATUS.not_found;
+  const name = p.query || "";
+  const permit = p.permit
+    ? `<span class="permit" onclick="copyPermit('${p.permit}')" title="העתק מספר היתר">
+         <span class="c">היתר</span>${p.permit}</span>` : "";
+  const manuf = p.manufacturer
+    ? `<span><span class="k">יצרן:</span> <span class="v">${esc(p.manufacturer)}</span></span>` : "";
+  const matched = (p.matched_name && p.status!=="not_found")
+    ? `<span><span class="k">זוהה כ־</span> <span class="v">${esc(p.matched_name)}</span></span>` : "";
+  const conf = p.verified ? `
+    <div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>` : `
+    <div class="conf">
+      <div class="bar"><div class="fill" style="width:${pct(p.confidence)}%;background:${confColor(p.status)}"></div></div>
+      <div class="lbl">רמת התאמה ${pct(p.confidence)}%</div>
+    </div>`;
+  const mii = p.made_in_israel ? `
+    <div class="mii">
+      <span class="flag">🇮🇱</span><b>תוצרת הארץ</b>
+      <span style="color:var(--ink-soft)">— מופיע במאגר הרשמי</span>
+      ${p.official_url ? `<a href="${p.official_url}" target="_blank" rel="noopener">צפה במאגר ↗</a>` : ""}
+    </div>` : (p.mii_status === "review" ? `
+    <div class="mii review">
+      <span class="flag">🇮🇱</span><b>ייתכן תוצרת הארץ — לבדיקה</b>
+      <span style="color:var(--ink-soft)">${p.mii_matched_name ? "התאמה אפשרית: " + esc(p.mii_matched_name) : ""}</span>
+      ${p.official_url ? `<a href="${p.official_url}" target="_blank" rel="noopener">בדקו במאגר ↗</a>` : ""}
+    </div>` : "");
+
+  const vbadge = p.verified ? `<span class="vbadge">✔ אומת</span>` : "";
+  const confirmrow = p.verified ? `
+      <div class="confirmrow ok">✔ אומת ידנית מול המאגר
+        <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>` : `
+      <div class="confirmrow">
+        <span class="ask">התוצאה נכונה?</span>
+        <button class="vbtn yes" onclick="confirmCorrect(${ri},${pi})">✓ נכון</button>
+        <button class="vbtn no" onclick="startWrong(${ri},${pi})">✗ שגוי</button>
+      </div>
+      <div class="editbar" id="wrong-eb-${ri}-${pi}">
+        <input id="wrong-in-${ri}-${pi}" type="text" inputmode="numeric" placeholder="מספר היתר נכון מהמאגר">
+        <label><input type="checkbox" id="wrong-nc-${ri}-${pi}"> אין תו תקן</label>
+        <button class="save" onclick="saveWrong(${ri},${pi})">שמור</button>
+        <button class="cancel" onclick="cancelWrong(${ri},${pi})">ביטול</button>
+      </div>`;
+
+  return `<div class="item" id="it-${ri}-${pi}">
+      <div class="row1">
+        <div class="pname" id="nm-${ri}-${pi}">${esc(name)}</div>
+        <span class="pill ${st.cls}">${st.label}</span>${vbadge}
+      </div>
+      ${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}
+      ${conf}
+      ${mii}
+      ${confirmrow}
+      <div style="margin-top:8px"><button class="linkbtn" onclick="startMiiEdit(${ri},${pi})">✎ ערוך שם לבדיקת תוצרת הארץ</button></div>
+      <div class="editbar" id="mii-eb-${ri}-${pi}">
+        <input id="mii-in-${ri}-${pi}" type="text" value="${esc(p.mii_query || p.query || "")}" placeholder="שם לחיפוש במאגר תוצרת הארץ">
+        <button class="save" onclick="saveMiiEdit(${ri},${pi})">בדוק מחדש</button>
+        <button class="cancel" onclick="cancelMiiEdit(${ri},${pi})">ביטול</button>
+      </div>
+      <div style="margin-top:10px"><button class="linkbtn" onclick="startEdit(${ri},${pi})">✎ ערוך שם מוצר ובדוק מחדש</button></div>
+      <div class="editbar" id="eb-${ri}-${pi}">
+        <button class="save" onclick="saveEdit(${ri},${pi})">בדוק מחדש</button>
+        <button class="cancel" onclick="cancelEdit(${ri},${pi})">ביטול</button>
+      </div>
+    </div>`;
+}
+
+function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+
+window.copyPermit = p => { navigator.clipboard.writeText(String(p)); toast("מספר היתר הועתק: "+p); };
+
+window.startEdit = (ri,pi)=>{
+  const nm = $(`#nm-${ri}-${pi}`);
+  nm.setAttribute("contenteditable","true"); nm.focus();
+  document.getSelection().selectAllChildren(nm);
+  $(`#eb-${ri}-${pi}`).classList.add("show");
+};
+window.cancelEdit = (ri,pi)=>{
+  const nm = $(`#nm-${ri}-${pi}`);
+  nm.removeAttribute("contenteditable");
+  nm.textContent = window.__data[ri].products[pi].query;
+  $(`#eb-${ri}-${pi}`).classList.remove("show");
+};
+window.saveEdit = async (ri,pi)=>{
+  const nm = $(`#nm-${ri}-${pi}`);
+  const newName = nm.textContent.trim();
+  nm.removeAttribute("contenteditable");
+  $(`#eb-${ri}-${pi}`).classList.remove("show");
+  try{
+    const res = await fetch("/api/match",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({names:[newName]})});
+    const data = await res.json();
+    const updated = data.products[0];
+    window.__data[ri].products[pi] = updated;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(updated, ri, pi);
+    recount();
+    toast("נבדק מחדש");
+  }catch(e){ toast("שגיאה בבדיקה החוזרת"); }
+};
+window.startMiiEdit = (ri,pi)=>{
+  $(`#mii-eb-${ri}-${pi}`).classList.add("show");
+  const inp = $(`#mii-in-${ri}-${pi}`); inp.focus(); inp.select();
+};
+window.cancelMiiEdit = (ri,pi)=>{ $(`#mii-eb-${ri}-${pi}`).classList.remove("show"); };
+window.saveMiiEdit = async (ri,pi)=>{
+  const inp = $(`#mii-in-${ri}-${pi}`);
+  const term = inp.value.trim();
+  $(`#mii-eb-${ri}-${pi}`).classList.remove("show");
+  if(!term) return;
+  try{
+    const res = await fetch("/api/match",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({names:[term]})});
+    const data = await res.json();
+    const r = data.products[0];
+    const cur = window.__data[ri].products[pi];
+    // Update ONLY the made-in-Israel fields; leave the SII result (status,
+    // permit, manufacturer, confidence) exactly as it was.
+    cur.made_in_israel  = r.made_in_israel;
+    cur.mii_status      = r.mii_status;
+    cur.mii_confidence  = r.mii_confidence;
+    cur.mii_matched_name= r.mii_matched_name;
+    cur.official_url    = r.official_url;
+    cur.mii_query       = term;   // remember the last search term
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(cur, ri, pi);
+    toast("בדיקת תוצרת הארץ עודכנה");
+  }catch(e){ toast("שגיאה בבדיקה החוזרת"); }
+};
+async function postConfirm(body){
+  const res = await fetch("/api/confirm",{method:"POST",headers:{"Content-Type":"application/json"},
+    body:JSON.stringify(body)});
+  return res.json();
+}
+window.confirmCorrect = async (ri,pi)=>{
+  const p = {...window.__data[ri].products[pi]};
+  if(p.permit){ p.status="approved"; p.confidence=1; }   // confirming a permit = approved
+  try{
+    await postConfirm({raw:p.query, record:p});
+    p.verified = true;
+    window.__data[ri].products[pi] = p;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
+    recount(); toast("אומת ונשמר");
+  }catch(e){ toast("שגיאה בשמירה"); }
+};
+window.startWrong  = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.add("show"); $(`#wrong-in-${ri}-${pi}`).focus(); };
+window.cancelWrong = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.remove("show"); };
+window.saveWrong = async (ri,pi)=>{
+  const p = {...window.__data[ri].products[pi]};
+  const permit = $(`#wrong-in-${ri}-${pi}`).value.trim();
+  const notCert = $(`#wrong-nc-${ri}-${pi}`).checked;
+  if(!permit && !notCert){ toast("הזינו מספר היתר או סמנו 'אין תו תקן'"); return; }
+  $(`#wrong-eb-${ri}-${pi}`).classList.remove("show");
+  if(notCert){ p.status="not_found"; p.permit=null; p.matched_name=null; p.confidence=0; }
+  else { p.status="approved"; p.permit=permit; p.matched_name=p.matched_name||p.query; p.confidence=1; }
+  try{
+    await postConfirm({raw:p.query, record:p});
+    p.verified = true;
+    window.__data[ri].products[pi] = p;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
+    recount(); toast("התיקון אומת ונשמר");
+  }catch(e){ toast("שגיאה בשמירה"); }
+};
+window.unconfirm = async (ri,pi)=>{
+  const p = window.__data[ri].products[pi];
+  try{
+    await postConfirm({raw:p.query, remove:true});
+    const res = await fetch("/api/match",{method:"POST",headers:{"Content-Type":"application/json"},
+      body:JSON.stringify({names:[p.query]})});
+    const fresh = (await res.json()).products[0];
+    window.__data[ri].products[pi] = fresh;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(fresh, ri, pi);
+    recount(); toast("האימות בוטל");
+  }catch(e){ toast("שגיאה"); }
+};
+function recount(){
+  let ok=0,rv=0,no=0;
+  (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{
+    if(p.status==="approved")ok++; else if(p.status==="review")rv++; else no++;}));
+  $("#nOk").textContent=ok; $("#nRv").textContent=rv; $("#nNo").textContent=no;
+}
+</script>
+</body>
+</html>

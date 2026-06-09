@@ -1,0 +1,11 @@
+# Secrets — NEVER commit your real key
+api_key.txt
+.env
+*.key
+
+# OS / Python junk
+.DS_Store
+__pycache__/
+*.pyc
+.venv/
+venv/
