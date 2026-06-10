@@ -267,9 +267,31 @@ fileInput.addEventListener("change", e=>addFiles(e.target.files));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
 drop.addEventListener("drop", e=>addFiles(e.dataTransfer.files));
 
-function addFiles(list){
+// Compress photos client-side: the server accepts at most ~4.5 MB per request.
+const SHRINK_MAX_DIM = 2000, SHRINK_TARGET = 1.4*1024*1024;
+async function shrinkImage(f){
+  if(f.size <= SHRINK_TARGET) return f;
+  try{
+    const bmp = await createImageBitmap(f);
+    const scale = Math.min(1, SHRINK_MAX_DIM / Math.max(bmp.width, bmp.height));
+    const c = document.createElement("canvas");
+    c.width = Math.max(1, Math.round(bmp.width*scale));
+    c.height = Math.max(1, Math.round(bmp.height*scale));
+    c.getContext("2d").drawImage(bmp, 0, 0, c.width, c.height);
+    let q = 0.85, blob = null;
+    do{
+      blob = await new Promise(r=>c.toBlob(r, "image/jpeg", q));
+      q -= 0.15;
+    }while(blob && blob.size > SHRINK_TARGET && q > 0.3);
+    if(!blob) return f;
+    return new File([blob], f.name.replace(/\.[^.]+$/, "") + ".jpg", {type:"image/jpeg"});
+  }catch(e){ return f; }
+}
+async function addFiles(list){
   for(const f of list){
-    if(f.type.startsWith("image/")) queued.push({file:f, name:f.name});
+    if(!f.type.startsWith("image/")) continue;
+    const g = await shrinkImage(f);
+    queued.push({file:g, name:f.name});
   }
   renderQueue(); refreshButton();
 }
@@ -301,6 +323,10 @@ $("#check").addEventListener("click", async ()=>{
   btn.disabled = true;
   btn.innerHTML = `<span class="spinner"></span>קורא ובודק…`;
   try{
+    const total = queued.reduce((s,q)=>s+q.file.size, 0);
+    if(total > 4.2*1024*1024){
+      throw new Error("\u05d4\u05ea\u05de\u05d5\u05e0\u05d5\u05ea \u05d2\u05d3\u05d5\u05dc\u05d5\u05ea \u05de\u05d3\u05d9 \u05dc\u05de\u05e9\u05dc\u05d5\u05d7 \u05d0\u05d7\u05d3 \u2014 \u05d1\u05d3\u05e7\u05d5 \u05e4\u05d7\u05d5\u05ea \u05ea\u05de\u05d5\u05e0\u05d5\u05ea \u05d1\u05db\u05dc \u05e4\u05e2\u05dd");
+    }
     const fd = new FormData();
     queued.forEach(q=>fd.append("files", q.file, q.name));
     const res = await fetch("/api/extract", {method:"POST", body:fd});
