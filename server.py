@@ -21,6 +21,7 @@ import base64
 import json
 import os
 import sys
+from concurrent.futures import ThreadPoolExecutor
 
 from flask import Flask, request, jsonify, send_from_directory
 
@@ -36,6 +37,11 @@ SUPPORTED_IMAGE = {
 }
 SUPPORTED_PDF = {"application/pdf"}
 SUPPORTED = SUPPORTED_IMAGE | SUPPORTED_PDF
+
+# Batch limits. Files are read concurrently (each is one API call), so a batch
+# finishes in about the time of its slowest file rather than the sum of all.
+MAX_FILES = 25       # reject oversized batches with a clear message
+MAX_WORKERS = 8      # concurrent reads (bounded to stay within API rate limits)
 
 # Sample names returned in DEMO mode (real product names from the databases,
 # so matching produces a realistic mix of statuses).
@@ -165,7 +171,12 @@ def extract():
 
     if not files:
         return jsonify({"error": "no files uploaded"}), 400
+    if len(files) > MAX_FILES:
+        return jsonify({"error": f"יותר מדי קבצים: {len(files)} (מקסימום {MAX_FILES} בבת אחת)"}), 400
 
+    # Read bytes + resolve media types up front (cheap, in the request thread),
+    # so the worker threads only do the network-bound API calls.
+    jobs = []
     for f in files:
         media_type = (f.mimetype or "").lower()
         # Some browsers send octet-stream; fall back to the extension for PDFs.
@@ -173,18 +184,26 @@ def extract():
             media_type = "application/pdf"
         if not media_type:
             media_type = "image/jpeg"
-        entry = {"file": f.filename, "products": []}
-        if media_type not in SUPPORTED:
-            entry["error"] = f"unsupported file type: {media_type}"
-            results.append(entry)
-            continue
+        jobs.append({"file": f.filename, "media_type": media_type, "data": f.read()})
+
+    get_client()  # initialise the shared client once before threads start
+
+    def process(job):
+        entry = {"file": job["file"], "products": []}
+        if job["media_type"] not in SUPPORTED:
+            entry["error"] = f"unsupported file type: {job['media_type']}"
+            return entry
         try:
-            data_b64 = base64.b64encode(f.read()).decode("ascii")
-            names = extract_names(media_type, data_b64)
+            data_b64 = base64.b64encode(job["data"]).decode("ascii")
+            names = extract_names(job["media_type"], data_b64)
             entry["products"] = matcher.match_many(names)
         except Exception as exc:  # noqa: BLE001 — surface per-file, keep batch alive
             entry["error"] = str(exc)
-        results.append(entry)
+        return entry
+
+    # Process files concurrently; ex.map preserves input order in the output.
+    with ThreadPoolExecutor(max_workers=min(MAX_WORKERS, len(jobs))) as ex:
+        results = list(ex.map(process, jobs))
 
     return jsonify({"mode": "live", "results": results})
 

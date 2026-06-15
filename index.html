@@ -267,10 +267,15 @@ fileInput.addEventListener("change", e=>addFiles(e.target.files));
 ["dragleave","drop"].forEach(ev=>drop.addEventListener(ev,e=>{e.preventDefault();drop.classList.remove("over");}));
 drop.addEventListener("drop", e=>addFiles(e.dataTransfer.files));
 
+const MAX_FILES = 25;
 function addFiles(list){
   for(const f of list){
     const isPdf = f.type === "application/pdf" || /\.pdf$/i.test(f.name);
     if(f.type.startsWith("image/") || isPdf) queued.push({file:f, name:f.name});
+  }
+  if(queued.length > MAX_FILES){
+    queued = queued.slice(0, MAX_FILES);
+    toast(`אפשר עד ${MAX_FILES} קבצים בבת אחת — נשמרו ${MAX_FILES} הראשונים`);
   }
   renderQueue(); refreshButton();
 }
