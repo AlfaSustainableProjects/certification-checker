@@ -34,6 +34,8 @@ DEMO_MODE = not API_KEY
 SUPPORTED_IMAGE = {
     "image/jpeg", "image/png", "image/gif", "image/webp",
 }
+SUPPORTED_PDF = {"application/pdf"}
+SUPPORTED = SUPPORTED_IMAGE | SUPPORTED_PDF
 
 # Sample names returned in DEMO mode (real product names from the databases,
 # so matching produces a realistic mix of statuses).
@@ -85,21 +87,30 @@ EXTRACT_PROMPT = """אתה קורא תעודת משלוח / חשבונית של 
 ["כוחלה 119", "דבק אריחים C2TES2", "אקרילפז סופר"]"""
 
 
-def extract_names_from_image(media_type: str, data_b64: str):
-    """Call the vision model and return a list of product-name strings."""
+def extract_names(media_type: str, data_b64: str):
+    """Call the model on an image OR a PDF and return product-name strings.
+
+    Images use an `image` content block; PDFs use a `document` block, which
+    Claude reads natively (both text-based and scanned/visual PDFs) — no
+    server-side PDF library or system dependency needed.
+    """
     client = get_client()
+    if media_type in SUPPORTED_PDF:
+        source_block = {"type": "document",
+                        "source": {"type": "base64",
+                                   "media_type": "application/pdf",
+                                   "data": data_b64}}
+    else:
+        source_block = {"type": "image",
+                        "source": {"type": "base64",
+                                   "media_type": media_type,
+                                   "data": data_b64}}
     msg = client.messages.create(
         model=MODEL,
-        max_tokens=1024,
+        max_tokens=2048,
         messages=[{
             "role": "user",
-            "content": [
-                {"type": "image",
-                 "source": {"type": "base64",
-                            "media_type": media_type,
-                            "data": data_b64}},
-                {"type": "text", "text": EXTRACT_PROMPT},
-            ],
+            "content": [source_block, {"type": "text", "text": EXTRACT_PROMPT}],
         }],
     )
     text = "".join(b.text for b in msg.content if b.type == "text").strip()
@@ -156,15 +167,20 @@ def extract():
         return jsonify({"error": "no files uploaded"}), 400
 
     for f in files:
-        media_type = f.mimetype or "image/jpeg"
+        media_type = (f.mimetype or "").lower()
+        # Some browsers send octet-stream; fall back to the extension for PDFs.
+        if media_type not in SUPPORTED and (f.filename or "").lower().endswith(".pdf"):
+            media_type = "application/pdf"
+        if not media_type:
+            media_type = "image/jpeg"
         entry = {"file": f.filename, "products": []}
-        if media_type not in SUPPORTED_IMAGE:
+        if media_type not in SUPPORTED:
             entry["error"] = f"unsupported file type: {media_type}"
             results.append(entry)
             continue
         try:
             data_b64 = base64.b64encode(f.read()).decode("ascii")
-            names = extract_names_from_image(media_type, data_b64)
+            names = extract_names(media_type, data_b64)
             entry["products"] = matcher.match_many(names)
         except Exception as exc:  # noqa: BLE001 — surface per-file, keep batch alive
             entry["error"] = str(exc)
