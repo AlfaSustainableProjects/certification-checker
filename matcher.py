@@ -1,5 +1,5 @@
 """
-matcher.py — Certification matching engine (v2).
+matcher.py — Certification matching engine (v3).
 
 Given a product name read off a delivery note, finds the best match in:
   * SII  — Standards Institution certified products (תו תקן) -> permit + manufacturer
@@ -19,6 +19,18 @@ v2 changes (tuned on real delivery notes):
     product surfaces with its candidate permit for a human glance, rather than
     being hidden as "not found".
 
+v3 accuracy improvements:
+  - Model-number conflict penalty: when BOTH the query and the DB entry contain
+    short numeric identifier tokens that do NOT overlap, the score is halved.
+    Prevents SAKRET PR-996 from matching SAKRET PR-007, or תרמוקיר 100 AD from
+    matching תרמוקיר 500 AD — different model numbers, different products.
+    Does NOT penalise when only one side has a numeric (e.g. quantity in query).
+  - Compound Latin sub-token expansion: delivery notes sometimes concatenate brand
+    and product names without separators (e.g. "KNAUFORBOND", "SIKASIL"). At
+    match time, a long all-alpha Latin query token is expanded with any known DB
+    token found as a substring (len ≥ 4), so "KNAUFORBOND" also emits "knauf"
+    and can match "שפכטל KNAUF" at review level for human inspection.
+
 Pure standard library — runs anywhere Python runs.
 """
 
@@ -30,11 +42,13 @@ import unicodedata
 from collections import Counter
 
 APPROVED_THRESHOLD = 0.82   # >= this vs SII -> מאושר   (approved, auto)
-REVIEW_THRESHOLD = 0.45     # >= this        -> לבדיקה  (surface for human check)
+REVIEW_THRESHOLD = 0.70     # >= this        -> לבדיקה  (surface for human check)
+                            # Raised from 0.45 → 0.70: eliminates weak partial
+                            # matches (wrong brand / wrong model) that looked like
+                            # false reviews. Only show a candidate if confidence is
+                            # genuinely high; otherwise return not_found.
 MII_THRESHOLD = 0.78        # >= this vs MII -> תוצרת הארץ banner (confident)
-MII_REVIEW_THRESHOLD = 0.45 # >= this (but < MII_THRESHOLD) -> surface candidate
-                            # + link for a human glance, WITHOUT asserting origin.
-                            # Mirrors the SII review band: cast wide, claim nothing.
+MII_REVIEW_THRESHOLD = 0.70 # >= this (but < MII_THRESHOLD) -> surface candidate
 
 STATUS_APPROVED = "approved"
 STATUS_REVIEW = "review"
@@ -133,11 +147,56 @@ class CertMatcher:
                 self._df[t] += 1
         self._N = len(self.sii) + len(self.mii)
 
+        # Known long alpha tokens from the DB (len >= 4, no digits) used for
+        # sub-token expansion of compound Latin query tokens (v3).
+        self._known_sub_tokens = frozenset(
+            t for entry in (self.sii + self.mii)
+            for t in entry["tokens"]
+            if len(t) >= 4 and t.isalpha()
+        )
+
     def _idf(self, t: str) -> float:
         base = math.log((self._N + 1) / (self._df.get(t, 0) + 1)) + 1.0
         if t.isdigit() and len(t) <= 3:      # damp short model-number tokens
             base *= 0.45
         return base
+
+    def _qtokens(self, norm_text: str) -> frozenset:
+        """Tokenize a query with compound Latin sub-token expansion (v3).
+
+        For long all-alpha Latin tokens (len >= 7) that appear in delivery notes
+        as concatenated brand+model strings (e.g. "KNAUFORBOND", "SIKASIL"),
+        also emit any known DB token found as a substring (len >= 4).  This lets
+        "KNAUFORBOND" surface a "review" match against "שפכטל KNAUF" so the
+        human can confirm rather than silently returning not_found.
+        """
+        base = _tokens(norm_text)
+        extra = set()
+        for t in base:
+            if len(t) >= 7 and t.isalpha():
+                for kt in self._known_sub_tokens:
+                    if kt in t and kt != t:
+                        extra.add(kt)
+        return base | frozenset(extra) if extra else base
+
+    def _model_penalty(self, qtok: frozenset, ctok: frozenset) -> float:
+        """Penalise when query and DB entry carry conflicting short numeric IDs (v3).
+
+        Rule: if BOTH sides have short digit-only tokens (2–4 chars) AND those
+        sets are completely disjoint, the match is almost certainly the wrong
+        model — halve the score.  Single-side numerics (e.g. a quantity in the
+        query that the terse DB name omits) are not penalised.
+
+        Examples that trigger the penalty:
+          SAKRET PR-996  vs  SAKRET PR-007   (996 ≠ 007 on both sides)
+          תרמוקיר 100 AD vs תרמוקיר 500 AD  (100 ≠ 500 on both sides)
+        """
+        is_model = lambda t: t.isdigit() and 2 <= len(t) <= 4
+        q_nums = frozenset(t for t in qtok if is_model(t))
+        c_nums = frozenset(t for t in ctok if is_model(t))
+        if q_nums and c_nums and q_nums.isdisjoint(c_nums):
+            return 0.5
+        return 1.0
 
     def _wcov(self, inter, toks) -> float:
         den = sum(self._idf(t) for t in toks)
@@ -160,7 +219,8 @@ class CertMatcher:
         cov_c, cov_q = self._covs(qtok, ctok)
         if cov_c == 0.0 and cov_q == 0.0:
             return 0.0
-        return min(1.0, 0.60 * cov_c + 0.40 * cov_q)
+        penalty = self._model_penalty(qtok, ctok)
+        return min(1.0, (0.60 * cov_c + 0.40 * cov_q) * penalty)
 
     def _confidence(self, qtok, ctok) -> float:
         # DISPLAY confidence for the chosen winner: same blend, plus a bonus
@@ -170,7 +230,8 @@ class CertMatcher:
         base = 0.60 * cov_c + 0.40 * cov_q
         if cov_c >= 0.95:
             base += 0.15
-        return min(1.0, base)
+        penalty = self._model_penalty(qtok, ctok)
+        return min(1.0, base * penalty)
 
     def _best(self, db, qtok):
         best, best_s = None, 0.0
@@ -183,7 +244,7 @@ class CertMatcher:
         return best, self._confidence(qtok, best["tokens"])  # report display confidence
 
     def match(self, raw_name: str) -> dict:
-        qtok = _tokens(normalize(raw_name))
+        qtok = self._qtokens(normalize(raw_name))
         result = {"query": raw_name, "status": STATUS_NOT_FOUND, "confidence": 0.0,
                   "permit": None, "manufacturer": None, "matched_name": None,
                   "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
