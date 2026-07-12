@@ -397,6 +397,19 @@ function itemHTML(p, ri, pi){
       ${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}
       ${conf}
       ${mii}
+      <div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${p.official_url
+          ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>`
+          : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
+        ${p.link_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
+        <button class="linkbtn" onclick="startLinkEdit(${ri},${pi})">✎ ערוך ואמת קישור</button>
+      </div>
+      <div class="editbar" id="lk-eb-${ri}-${pi}">
+        <input id="lk-in-${ri}-${pi}" type="url" dir="ltr" style="text-align:left"
+               value="${esc(p.official_url || "")}" placeholder="https://... הדביקו את הקישור הנכון">
+        <button class="save" onclick="saveLinkEdit(${ri},${pi})">שמור ואמת קישור</button>
+        <button class="cancel" onclick="cancelLinkEdit(${ri},${pi})">ביטול</button>
+      </div>
       ${confirmrow}
       <div style="margin-top:8px"><button class="linkbtn" onclick="startMiiEdit(${ri},${pi})">✎ ערוך שם לבדיקת תוצרת הארץ</button></div>
       <div class="editbar" id="mii-eb-${ri}-${pi}">
@@ -431,6 +444,8 @@ window.cancelEdit = (ri,pi)=>{
 window.saveEdit = async (ri,pi)=>{
   const nm = $(`#nm-${ri}-${pi}`);
   const newName = nm.textContent.trim();
+  const prev = window.__data[ri].products[pi];
+  const orig = prev.original_read || prev.query;   // preserve the ORIGINAL OCR read
   nm.removeAttribute("contenteditable");
   $(`#eb-${ri}-${pi}`).classList.remove("show");
   try{
@@ -438,6 +453,7 @@ window.saveEdit = async (ri,pi)=>{
       body:JSON.stringify({names:[newName]})});
     const data = await res.json();
     const updated = data.products[0];
+    updated.original_read = orig;                   // so confirming stores the misread as an alias
     window.__data[ri].products[pi] = updated;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(updated, ri, pi);
     recount();
@@ -481,12 +497,32 @@ window.confirmCorrect = async (ri,pi)=>{
   const p = {...window.__data[ri].products[pi]};
   if(p.permit){ p.status="approved"; p.confidence=1; }   // confirming a permit = approved
   try{
-    await postConfirm({raw:p.query, record:p});
+    await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
     p.verified = true;
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
     recount(); toast("אומת ונשמר");
   }catch(e){ toast("שגיאה בשמירה"); }
+};
+window.startLinkEdit  = (ri,pi)=>{ $(`#lk-eb-${ri}-${pi}`).classList.add("show"); const i=$(`#lk-in-${ri}-${pi}`); i.focus(); i.select(); };
+window.cancelLinkEdit = (ri,pi)=>{ $(`#lk-eb-${ri}-${pi}`).classList.remove("show"); };
+window.saveLinkEdit = async (ri,pi)=>{
+  const p = {...window.__data[ri].products[pi]};
+  const url = $(`#lk-in-${ri}-${pi}`).value.trim();
+  $(`#lk-eb-${ri}-${pi}`).classList.remove("show");
+  if(!url){ toast("הדביקו קישור תקין"); return; }
+  if(!/^https?:\/\//i.test(url)){ toast("הקישור חייב להתחיל ב־http"); return; }
+  p.official_url = url;
+  p.link_verified = true;
+  try{
+    // Persist the human-verified link into the shared memory (aliases the
+    // original OCR read too, so the whole answer returns next time).
+    await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
+    p.verified = true;
+    window.__data[ri].products[pi] = p;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
+    recount(); toast("הקישור אומת ונשמר בזיכרון");
+  }catch(e){ toast("שגיאה בשמירת הקישור"); }
 };
 window.startWrong  = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.add("show"); $(`#wrong-in-${ri}-${pi}`).focus(); };
 window.cancelWrong = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.remove("show"); };
@@ -499,7 +535,7 @@ window.saveWrong = async (ri,pi)=>{
   if(notCert){ p.status="not_found"; p.permit=null; p.matched_name=null; p.confidence=0; }
   else { p.status="approved"; p.permit=permit; p.matched_name=p.matched_name||p.query; p.confidence=1; }
   try{
-    await postConfirm({raw:p.query, record:p});
+    await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
     p.verified = true;
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);

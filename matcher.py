@@ -38,6 +38,7 @@ import json
 import math
 import os
 import re
+import sys
 import unicodedata
 from collections import Counter
 
@@ -155,6 +156,20 @@ class CertMatcher:
             if len(t) >= 4 and t.isalpha()
         )
 
+        # Learnable, SHARED correction memory (aliases + human-verified answers).
+        # Migrates the old flat verified_answers.json in on first run.
+        try:
+            from memory import Memory, make_store
+            self.memory = Memory(make_store(), normalize,
+                                 lambda s: self._qtokens(s),
+                                 result_keys=RESULT_KEYS,
+                                 migrate_from=self.verified)
+            print("memory: %d learned corrections (%s)" % (
+                self.memory.count, self.memory.describe()), file=sys.stderr)
+        except Exception as exc:
+            print("memory init failed (%s); continuing without learning" % exc, file=sys.stderr)
+            self.memory = None
+
     def _idf(self, t: str) -> float:
         base = math.log((self._N + 1) / (self._df.get(t, 0) + 1)) + 1.0
         if t.isdigit() and len(t) <= 3:      # damp short model-number tokens
@@ -250,14 +265,15 @@ class CertMatcher:
                   "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
                   "mii_status": "none", "mii_matched_name": None}
 
-        # 1) Verified-answer key wins outright (the tool's confirmed memory).
-        vkey = normalize(raw_name)
-        if vkey and vkey in self.verified:
-            rec = dict(result)
-            rec.update(self.verified[vkey])
-            rec["query"] = raw_name
-            rec["verified"] = True
-            return rec
+        # 1) Learned memory wins outright: exact alias (fixes a repeated misread)
+        #    + fuzzy recall (tolerates OCR variance). Human-verified & shared.
+        if self.memory is not None:
+            mem = self.memory.lookup(raw_name, self._confidence)
+            if mem:
+                rec = dict(result)
+                rec.update(mem)
+                rec["query"] = raw_name
+                return rec
 
         if not qtok:
             return result
@@ -297,26 +313,24 @@ class CertMatcher:
             json.dump(self.verified, f, ensure_ascii=False, indent=1)
         os.replace(tmp, self.verified_path)   # atomic on same filesystem
 
-    def confirm(self, raw_name: str, record: dict) -> bool:
-        """Store a human-verified result for this product name. Sanitizes to the
-        known result keys so UI cruft isn't persisted. Overwrites any prior entry."""
-        key = normalize(raw_name)
-        if not key:
+    def confirm(self, original_read: str, record: dict, corrected_name: str = None) -> bool:
+        """Record a human correction into the shared memory.
+
+        original_read  — exactly what the OCR produced (becomes an alias).
+        corrected_name — the human-fixed product name (defaults to the read/match).
+        record         — the verified result carrying the corrected permit/link/status.
+
+        A name fix makes the misread resolve next time; a link/permit fix is stored
+        on the product and overrides the fuzzy matcher from then on."""
+        if self.memory is None:
             return False
+        canonical = corrected_name or record.get("query") or record.get("matched_name") or original_read
         rec = {k: record.get(k) for k in RESULT_KEYS if k in record}
-        rec["verified"] = True
-        self.verified[key] = rec
-        self._persist_verified()
-        return True
+        return self.memory.learn(original_read, canonical, rec)
 
     def unconfirm(self, raw_name: str) -> bool:
-        """Remove a verified answer (undo)."""
-        key = normalize(raw_name)
-        if key in self.verified:
-            del self.verified[key]
-            self._persist_verified()
-            return True
-        return False
+        """Remove a learned correction (undo)."""
+        return self.memory.forget(raw_name) if self.memory is not None else False
 
     def match_many(self, names):
         return [self.match(n) for n in names]
@@ -324,4 +338,4 @@ class CertMatcher:
     @property
     def counts(self):
         return {"sii": len(self.sii), "mii": len(self.mii),
-                "verified": len(self.verified)}
+                "verified": self.memory.count if self.memory is not None else 0}

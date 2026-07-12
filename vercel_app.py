@@ -87,8 +87,12 @@ if APP_PASSWORD:
         return redirect("/login")
 
 # ------------------------------------------------------------ blob persistence
+# NOTE: correction persistence now lives in memory.py (BlobStore) — it detects
+# BLOB_READ_WRITE_TOKEN itself and stores the learnable memory in the blob
+# cert_corrections_v2.json. The code below only MIGRATES answers saved by the
+# old deployment into the old blob (verified_answers.json), one time.
 BLOB_TOKEN = os.environ.get("BLOB_READ_WRITE_TOKEN", "").strip()
-BLOB_API = "https://blob.vercel-storage.com"
+BLOB_API = os.environ.get("BLOB_API_URL", "https://blob.vercel-storage.com")
 BLOB_PATH = "verified_answers.json"
 
 
@@ -128,20 +132,22 @@ def _blob_save(obj):
         r.read()
 
 
-if BLOB_TOKEN:
+if BLOB_TOKEN and getattr(server.matcher, "memory", None) is not None:
+    # One-time migration: pull answers the OLD deployment stored in the old
+    # verified_answers.json blob into the new learnable memory (skips ones
+    # already there). New corrections persist via memory.py's BlobStore.
     try:
-        server.matcher.verified.update(_blob_load())
+        legacy = _blob_load()
+        mem = server.matcher.memory
+        imported = 0
+        for k, rec in (legacy or {}).items():
+            canonical = rec.get("query") or k
+            if mem._normalize(canonical) in mem._by_norm:
+                continue
+            answer = {kk: vv for kk, vv in rec.items() if kk not in ("query", "verified")}
+            mem.learn(k, canonical, answer)
+            imported += 1
+        if imported:
+            print("migrated %d legacy verified answers from blob" % imported, file=sys.stderr)
     except Exception as exc:  # noqa: BLE001
-        print("blob load failed:", exc, file=sys.stderr)
-
-    def _persist_to_blob():
-        try:
-            _blob_save(server.matcher.verified)
-        except Exception as exc:  # noqa: BLE001
-            print("blob save failed:", exc, file=sys.stderr)
-
-    # Shadow the file-based persistence on this matcher instance.
-    server.matcher._persist_verified = _persist_to_blob
-elif os.environ.get("VERCEL"):
-    # No Blob store connected: keep answers in memory only (read-only FS).
-    server.matcher._persist_verified = lambda: None
+        print("legacy blob import failed:", exc, file=sys.stderr)

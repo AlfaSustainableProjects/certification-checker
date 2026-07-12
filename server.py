@@ -13,7 +13,8 @@ else (matching, permits, badges, banners) is identical in both modes.
 
 Environment variables:
     ANTHROPIC_API_KEY   your API key (absent -> DEMO mode)
-    CERT_MODEL          model to use (default: claude-sonnet-4-6)
+    CERT_MODEL          model to use (default: claude-opus-4-8; strongest read.
+                        Set claude-sonnet-4-6 / claude-haiku-4-5 for lower cost)
     PORT                port to serve on (default: 5000)
 """
 
@@ -28,7 +29,7 @@ from flask import Flask, request, jsonify, send_from_directory
 from matcher import CertMatcher
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-MODEL = os.environ.get("CERT_MODEL", "claude-sonnet-4-6")
+MODEL = os.environ.get("CERT_MODEL", "claude-opus-4-8")
 API_KEY = os.environ.get("ANTHROPIC_API_KEY", "").strip()
 DEMO_MODE = not API_KEY
 
@@ -328,14 +329,20 @@ def confirm():
     Body: {"raw": "<name>", "record": {...}}  or  {"raw": "<name>", "remove": true}.
     The stored answer is returned by future matches for that name."""
     payload = request.get_json(silent=True) or {}
-    raw = str(payload.get("raw", "")).strip()
-    if not raw:
-        return jsonify({"ok": False, "error": "missing name"}), 400
+    # `original` = the exact OCR read (becomes an alias); `corrected` = the
+    # human-fixed name. Older clients send only `raw` — treat it as the original.
+    original = str(payload.get("original") or payload.get("raw") or "").strip()
+    corrected = (str(payload.get("corrected") or "").strip() or None)
     if payload.get("remove"):
-        removed = matcher.unconfirm(raw)
+        target = corrected or original
+        if not target:
+            return jsonify({"ok": False, "error": "missing name"}), 400
+        removed = matcher.unconfirm(target)
         return jsonify({"ok": True, "removed": removed, "verified_count": matcher.counts["verified"]})
+    if not original:
+        return jsonify({"ok": False, "error": "missing name"}), 400
     record = payload.get("record") or {}
-    ok = matcher.confirm(raw, record)
+    ok = matcher.confirm(original, record, corrected_name=corrected)
     return jsonify({"ok": ok, "verified_count": matcher.counts["verified"]})
 
 
