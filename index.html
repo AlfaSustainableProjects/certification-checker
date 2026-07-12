@@ -401,6 +401,8 @@ function itemHTML(p, ri, pi){
         ${p.official_url
           ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>`
           : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
+        <a href="https://www.sii.org.il/he/certificationssearch?approveType=181&auto=true&query=${encodeURIComponent(p.permit != null ? String(p.permit) : (p.matched_name || p.query || ""))}"
+           target="_blank" rel="noopener">חיפוש במאגר SII ↗</a>
         ${p.link_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
         <button class="linkbtn" onclick="startLinkEdit(${ri},${pi})">✎ ערוך ואמת קישור</button>
       </div>
