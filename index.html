@@ -349,8 +349,8 @@ function itemHTML(p, ri, pi){
   const st = STATUS[p.status] || STATUS.not_found;
   const name = p.query || "";
   const permit = p.permit
-    ? `<span class="permit" onclick="copyPermit('${p.permit}')" title="העתק מספר היתר">
-         <span class="c">היתר</span>${p.permit}</span>` : "";
+    ? `<span class="permit" data-permit="${esc(String(p.permit))}" onclick="copyPermit(this.dataset.permit)" title="העתק מספר היתר">
+         <span class="c">היתר</span>${esc(String(p.permit))}</span>` : "";
   const manuf = p.manufacturer
     ? `<span><span class="k">יצרן:</span> <span class="v">${esc(p.manufacturer)}</span></span>` : "";
   const matched = (p.matched_name && p.status!=="not_found")
@@ -365,12 +365,12 @@ function itemHTML(p, ri, pi){
     <div class="mii">
       <span class="flag">🇮🇱</span><b>תוצרת הארץ</b>
       <span style="color:var(--ink-soft)">— מופיע במאגר הרשמי</span>
-      ${p.official_url ? `<a href="${p.official_url}" target="_blank" rel="noopener">צפה במאגר ↗</a>` : ""}
+      ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">צפה במאגר ↗</a>` : ""}
     </div>` : (p.mii_status === "review" ? `
     <div class="mii review">
       <span class="flag">🇮🇱</span><b>ייתכן תוצרת הארץ — לבדיקה</b>
       <span style="color:var(--ink-soft)">${p.mii_matched_name ? "התאמה אפשרית: " + esc(p.mii_matched_name) : ""}</span>
-      ${p.official_url ? `<a href="${p.official_url}" target="_blank" rel="noopener">בדקו במאגר ↗</a>` : ""}
+      ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">בדקו במאגר ↗</a>` : ""}
     </div>` : "");
 
   const vbadge = p.verified ? `<span class="vbadge">✔ אומת</span>` : "";

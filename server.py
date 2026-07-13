@@ -21,6 +21,7 @@ Environment variables:
 import base64
 import json
 import os
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 
@@ -342,8 +343,36 @@ def confirm():
     if not original:
         return jsonify({"ok": False, "error": "missing name"}), 400
     record = payload.get("record") or {}
+    err = _validate_record(record)
+    if err:
+        return jsonify({"ok": False, "error": err}), 400
     ok = matcher.confirm(original, record, corrected_name=corrected)
     return jsonify({"ok": ok, "verified_count": matcher.counts["verified"]})
+
+
+# Stored values are rendered into every user's page, so reject anything that
+# could break out of an HTML attribute. URLs: clean http(s), no quotes/spaces/
+# angle brackets/backticks. Permits: digits with optional dashes/slashes.
+_URL_OK = re.compile(r"^https?://[^\s'\"<>`\\]+$", re.IGNORECASE)
+_PERMIT_OK = re.compile(r"^[0-9][0-9\-/ .]{0,24}$")
+
+
+def _validate_record(rec):
+    if not isinstance(rec, dict):
+        return "רשומה לא תקינה"
+    url = rec.get("official_url")
+    if url not in (None, ""):
+        url = str(url).strip()
+        if not _URL_OK.match(url):
+            return "קישור לא תקין — נדרשת כתובת http(s) ללא רווחים, מרכאות או תווים מיוחדים"
+        rec["official_url"] = url
+    permit = rec.get("permit")
+    if permit not in (None, ""):
+        p = str(permit).strip()
+        if not _PERMIT_OK.match(p):
+            return "מספר היתר לא תקין — ספרות בלבד (אפשר מקף או לוכסן)"
+        rec["permit"] = int(p) if p.isdigit() else p
+    return None
 
 
 if __name__ == "__main__":

@@ -32,6 +32,7 @@ Pure standard library.
 import json
 import os
 import sys
+import threading
 import time
 import urllib.parse
 import urllib.request
@@ -59,7 +60,10 @@ class FileStore:
             return None
 
     def save(self, data):
-        tmp = self.path + ".tmp"
+        # Unique scratch name per save: concurrent saves each write their own
+        # temp file, so overlapping writes can never delete each other's scratch
+        # (a fixed ".tmp" name made parallel saves race and fail).
+        tmp = "%s.%d.%d.tmp" % (self.path, os.getpid(), threading.get_ident())
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=1)
         os.replace(tmp, self.path)  # atomic on same filesystem
@@ -293,20 +297,30 @@ class Memory:
         return True
 
     def forget(self, name):
+        """Surgical un-learn. If `name` is an entry's CANONICAL, the whole entry
+        is removed (the user is cancelling that product's verification). If it
+        only matches an ALIAS, just that alias is dropped — the canonical name,
+        verified permit/link and other aliases stay intact."""
         n = self._normalize(name)
+        if not n:
+            return False
         keep = []
-        removed = False
+        changed = False
         for e in self.entries:
-            keys = [self._normalize(k) for k in self._entry_keys(e)]
-            if n in keys:
-                removed = True
-            else:
-                keep.append(e)
-        if removed:
+            if self._normalize(e.get("canonical", "")) == n:
+                changed = True          # canonical -> remove entire entry
+                continue
+            aliases = e.get("aliases", [])
+            pruned = [a for a in aliases if self._normalize(a) != n]
+            if len(pruned) != len(aliases):
+                e["aliases"] = pruned   # alias -> drop only that reading
+                changed = True
+            keep.append(e)
+        if changed:
             self.entries = keep
             self._index()
             self._persist()
-        return removed
+        return changed
 
     def _persist(self):
         data = {"version": 2, "entries": [
