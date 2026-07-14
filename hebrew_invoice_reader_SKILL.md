@@ -62,6 +62,9 @@ If there is no table (free-form note), extract lines that start with a product n
 - Lot numbers / shade codes that appear AFTER the product name (e.g., the `672 69-315` in `TAMCRETE MC1 672 69-315` — include only `TAMCRETE MC1`)
 - `שק 25 ק"ג` — always packaging, always exclude
 
+- **Delivery, freight, service and fee lines — NEVER products.** Skip any line that describes logistics, a service, or a commercial term rather than a physical material: `הובלה`, `דמי הובלה`, `הובלה נהג`, `הובלה דאבל`, `משלוח`, `שירות`, `הנחה`, `מקדמה`, `פיקדון`, `החזר`.
+- **Project / site names and agreement references — not products.** Skip lines like `שוהם - הובלה דאבל לפי "הסכם התקשרות"`, `לפי סיכום`, `לפי הזמנה`, `הזמנת רכש PO...`. A town/site/project name (e.g. שוהם, בית לחיים) is a location, not a product. Only extract physical building-material products.
+
 ## Hebrew Letter Disambiguation
 
 When reading from photos, scans, or handwriting, take extra care with these confusable pairs:

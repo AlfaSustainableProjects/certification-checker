@@ -198,6 +198,36 @@ def _build_extract_prompt() -> str:
 
 EXTRACT_PROMPT = _build_extract_prompt()
 
+# ---- non-product line filter (freight / service / fees / PO & agreement refs) ----
+# A deterministic backstop: even if the reader emits a logistics line, it never
+# reaches the results. Matched as whole words/phrases against the normalized text
+# (via matcher.normalize) so a real product that merely contains a substring is
+# never dropped.
+import re as _re
+from matcher import normalize as _normalize
+_NON_PRODUCT_TERMS = [
+    "הובלה", "דמי משלוח", "הזמנת רכש", "הסכם התקשרות",
+    "לפי סיכום", "לפי הזמנה", "לפי הסכם",
+    "מקדמה", "פיקדון", "הנחה", "עמלה", "החזר",
+]
+_NON_PRODUCT_NORM = [n for n in (_normalize(t) for t in _NON_PRODUCT_TERMS) if n]
+_PO_RE = _re.compile(r"\bpo\s?\d{3,}", _re.I)
+
+def is_non_product(name: str) -> bool:
+    """True if this extracted line is a freight/service/fee/PO line, not a product."""
+    if not name or not name.strip():
+        return True
+    n = _normalize(name)
+    if not n:
+        return True
+    padded = " " + n + " "
+    for kw in _NON_PRODUCT_NORM:
+        if (" " + kw + " ") in padded:
+            return True
+    if _PO_RE.search(name):
+        return True
+    return False
+
 
 def extract_names(media_type: str, data_b64: str):
     """Call the model on an image OR a PDF and return product-name strings.
@@ -302,6 +332,7 @@ def extract():
         try:
             data_b64 = base64.b64encode(job["data"]).decode("ascii")
             names = extract_names(job["media_type"], data_b64)
+            names = [n for n in names if not is_non_product(n)]
             entry["products"] = matcher.match_many(names)
         except Exception as exc:  # noqa: BLE001 — surface per-file, keep batch alive
             entry["error"] = str(exc)
