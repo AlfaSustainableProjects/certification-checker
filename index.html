@@ -635,14 +635,17 @@ function recount(){
 /* ============ verified-certificates pack: screenshots -> ZIP ============ */
 function verifiedList(){
   const out=[];
-  (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{ if(p.verified || p.mii_verified) out.push({p, file:r.file}); }));
+  (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{
+    const v = REG==="mii" ? p.mii_verified : p.verified;
+    if(v) out.push({p, file:r.file});
+  }));
   return out;
 }
 function updateVpack(){
   const box=$("#vpack"); if(!box) return;
   const n=verifiedList().length;
   box.style.display = n ? "flex" : "none";
-  const btn=$("#vpackBtn"); if(btn) btn.textContent = `⬇︎ הורד אישורים מאומתים (${n})`;
+  const btn=$("#vpackBtn"); if(btn) btn.textContent = `⬇︎ ${REG==="mii"?"הורד אישורי תוצרת הארץ":"הורד אישורי תו ירוק"} (${n})`;
 }
 function pad2(x){ return String(x).padStart(2,"0"); }
 function stampForFile(){
@@ -662,34 +665,37 @@ const STCOL={
 };
 function proofRow(k,v){ return `<div><div style="color:#586173;font-size:12px">${k}</div><div style="margin-top:2px;font-size:15px">${v}</div></div>`; }
 function proofCard(p,file,idx,total){
-  const st=STATUS[p.status]||STATUS.not_found;
-  const c=STCOL[p.status]||STCOL.not_found;
+  const mii = REG==="mii";
   const when=p.verified_at?new Date(p.verified_at):new Date();
+  const key = mii ? miiState(p).key : (p.status||"not_found");
+  const label = mii ? miiState(p).label : (STATUS[p.status]||STATUS.not_found).label;
+  const c = STCOL[key]||STCOL.not_found;
+  const regTitle = mii ? "אישור תוצרת הארץ — מאומת" : "אישור תו ירוק — מאומת";
+  const regSub   = mii ? "מרשם מיוצר בישראל · תוצרת הארץ" : "מכון התקנים הישראלי · תו-תקן ירוק (SII)";
+  const link = mii ? p.official_url : p.cert_url;
+  const linkVer = mii ? p.mii_link_verified : p.cert_verified;
+  const rows = mii
+    ? `${proofRow("סוג אישור", "<b>תוצרת הארץ</b>")}${proofRow("סטטוס", esc(label))}${p.manufacturer?proofRow("יצרן", esc(p.manufacturer)):""}${p.mii_matched_name?proofRow("זוהה כ־", esc(p.mii_matched_name)):""}`
+    : `${proofRow("מספר היתר", (p.permit!=null&&p.permit!=="")?`<b style="font-family:'Rubik',Arial,sans-serif;font-size:20px">${esc(p.permit)}</b>`:"—")}${proofRow("סוג אישור","<b>תו ירוק (מכון התקנים)</b>")}${proofRow("סטטוס", esc(label))}${p.manufacturer?proofRow("יצרן", esc(p.manufacturer)):""}${p.matched_name?proofRow("זוהה כ־", esc(p.matched_name)):""}`;
   const el=document.createElement("div");
   el.setAttribute("dir","rtl");
   el.style.cssText="box-sizing:border-box;width:760px;background:#fffdf8;border:1px solid #e3e0d8;border-radius:16px;padding:30px 34px;font-family:'Heebo',Arial,sans-serif;color:#1b2430";
   el.innerHTML=
     `<div style="display:flex;justify-content:space-between;align-items:flex-start;border-bottom:2px solid ${c.fg};padding-bottom:14px;margin-bottom:18px">
        <div>
-         <div style="font-family:'Rubik',Arial,sans-serif;font-weight:700;font-size:22px">בדיקת תקן — אישור מאומת</div>
-         <div style="color:#586173;font-size:13px;margin-top:3px">מאגר מכון התקנים · תו-תקן / תוצרת הארץ</div>
+         <div style="font-family:'Rubik',Arial,sans-serif;font-weight:700;font-size:22px">${regTitle}</div>
+         <div style="color:#586173;font-size:13px;margin-top:3px">${regSub}</div>
        </div>
        <div dir="ltr" style="color:#586173;font-size:12px">${idx} / ${total}</div>
      </div>
      <div style="display:flex;justify-content:space-between;align-items:center;gap:16px">
        <div style="font-weight:700;font-size:24px;line-height:1.3">${esc(p.query||"")}</div>
-       <div style="font-family:'Rubik',Arial,sans-serif;font-weight:600;font-size:14px;color:${c.fg};background:${c.bg};border:1px solid ${c.bd};border-radius:999px;padding:6px 16px;white-space:nowrap">${st.label}</div>
+       <div style="font-family:'Rubik',Arial,sans-serif;font-weight:600;font-size:14px;color:${c.fg};background:${c.bg};border:1px solid ${c.bd};border-radius:999px;padding:6px 16px;white-space:nowrap">${esc(label)}</div>
      </div>
-     <div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:14px 20px">
-       ${proofRow("מספר היתר", (p.permit!=null&&p.permit!=="")?`<b style="font-family:'Rubik',Arial,sans-serif;font-size:20px">${esc(p.permit)}</b>`:"—")}
-       ${proofRow("סטטוס", esc(st.label))}
-       ${p.manufacturer?proofRow("יצרן", esc(p.manufacturer)):""}
-       ${p.matched_name?proofRow("זוהה כ־", esc(p.matched_name)):""}
-       ${p.made_in_israel?proofRow("תוצרת הארץ","כן"):""}
-     </div>
+     <div style="margin-top:20px;display:grid;grid-template-columns:1fr 1fr;gap:14px 20px">${rows}</div>
      <div style="margin-top:18px;padding:14px 16px;background:#ffffff;border:1px solid #e3e0d8;border-radius:10px">
-       <div style="color:#586173;font-size:12px;margin-bottom:5px">קישור לתעודה${p.link_verified?" · אומת ✔":""}</div>
-       <div dir="ltr" style="text-align:left;font-size:12.5px;word-break:break-all;color:#0a4ea3">${esc(p.cert_url || p.official_url || "— אין קישור —")}</div>
+       <div style="color:#586173;font-size:12px;margin-bottom:5px">${mii?"קישור למרשם תוצרת הארץ":"קישור לתעודת מכון התקנים"}${linkVer?" · אומת ✔":""}</div>
+       <div dir="ltr" style="text-align:left;font-size:12.5px;word-break:break-all;color:#0a4ea3">${esc(link || "— אין קישור —")}</div>
      </div>
      <div style="margin-top:18px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e3e0d8;padding-top:14px;color:#586173;font-size:12.5px">
        <div>✔ אומת ידנית · ${when.toLocaleString("he-IL")}</div>
@@ -710,7 +716,7 @@ async function buildVerifiedZip(){
   document.body.appendChild(holder);
   try{
     const zip=new JSZip();
-    const manifest=["בדיקת תקן — אישורים מאומתים", new Date().toLocaleString("he-IL"), ""];
+    const manifest=[(REG==="mii"?"אישורי תוצרת הארץ — מאומתים":"אישורי תו ירוק — מאומתים"), new Date().toLocaleString("he-IL"), ""];
     for(let i=0;i<items.length;i++){
       const {p,file}=items[i];
       const card=proofCard(p,file,i+1,items.length);
@@ -718,12 +724,12 @@ async function buildVerifiedZip(){
       const canvas=await html2canvas(card,{scale:2,backgroundColor:"#ffffff",logging:false,useCORS:true});
       const blob=await new Promise(res=>canvas.toBlob(res,"image/png"));
       holder.removeChild(card);
-      zip.file(`${pad2(i+1)}_${safeName(p.permit||p.query)}.png`, blob);
-      manifest.push(`${i+1}. ${p.query} | היתר ${p.permit||"-"} | ${(STATUS[p.status]||{}).label||""} | ${p.official_url||""}`);
+      zip.file(`${pad2(i+1)}_${safeName(REG==="mii"?p.query:(p.permit||p.query))}.png`, blob);
+      manifest.push(REG==="mii" ? `${i+1}. ${p.query} | תוצרת הארץ: ${p.made_in_israel?"כן":"לבדיקה"} | ${p.official_url||""}` : `${i+1}. ${p.query} | היתר ${p.permit||"-"} | תו ירוק | ${p.cert_url||""}`);
     }
     zip.file("index.txt", manifest.join("\n"));
     const out=await zip.generateAsync({type:"blob"});
-    downloadBlob(out, `verified_${stampForFile()}.zip`);
+    downloadBlob(out, `verified_${REG}_${stampForFile()}.zip`);
     toast(`הורדו ${items.length} אישורים מאומתים`);
   }catch(e){ toast("שגיאה ביצירת הקובץ: "+(e.message||e)); }
   finally{ holder.remove(); btn.disabled=false; btn.textContent=prev; updateVpack(); }
