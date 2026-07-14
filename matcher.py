@@ -57,7 +57,7 @@ STATUS_NOT_FOUND = "not_found"
 
 # The full shape of a match result, used to sanitize stored verified answers.
 RESULT_KEYS = ("query", "status", "confidence", "permit", "manufacturer",
-               "matched_name", "made_in_israel", "mii_confidence",
+               "matched_name", "cert_url", "made_in_israel", "mii_confidence",
                "official_url", "mii_status", "mii_matched_name")
 
 _NIQQUD = re.compile(r"[\u0591-\u05C7]")
@@ -278,7 +278,7 @@ class CertMatcher:
         qtok = self._qtokens(normalize(raw_name))
         result = {"query": raw_name, "status": STATUS_NOT_FOUND, "confidence": 0.0,
                   "permit": None, "manufacturer": None, "matched_name": None,
-                  "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
+                  "cert_url": None, "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
                   "mii_status": "none", "mii_matched_name": None}
 
         # 1) Learned memory wins outright: exact alias (fixes a repeated misread)
@@ -312,8 +312,6 @@ class CertMatcher:
                 # Confident: assert תוצרת הארץ.
                 result["made_in_israel"] = True
                 result["mii_status"] = "confirmed"
-                if not result["manufacturer"] and mii_hit["company"] not in ("", "(לזיהוי)"):
-                    result["manufacturer"] = mii_hit["company"]
             else:
                 # Borderline: surface the candidate + link for a human glance.
                 # Do NOT assert origin and do NOT borrow the manufacturer.

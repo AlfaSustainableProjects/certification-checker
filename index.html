@@ -193,6 +193,15 @@
     background:var(--ink); color:#fff; padding:10px 18px; border-radius:10px;
     font-size:13px; opacity:0; transition:opacity .2s; pointer-events:none; z-index:50}
   .toast.show{opacity:1}
+
+  /* registry mode toggle */
+  .regtabs{display:flex;gap:6px;margin-top:22px;background:#efece3;border:1px solid var(--line);
+    border-radius:12px;padding:5px}
+  .regtab{flex:1;font-family:"Rubik",sans-serif;font-weight:600;font-size:15px;color:var(--ink-soft);
+    background:transparent;border:0;border-radius:9px;padding:10px 14px;cursor:pointer;transition:all .15s}
+  .regtab.active{background:#fff;color:var(--accent);box-shadow:0 1px 3px var(--shadow)}
+  .regtab .sub{display:block;font-size:11px;font-weight:500;color:var(--ink-soft);margin-top:1px}
+  .regtab.active .sub{color:var(--ink-soft)}
 </style>
 </head>
 <body>
@@ -204,6 +213,11 @@
     </div>
     <span id="mode" class="mode">…</span>
   </header>
+
+  <div class="regtabs" id="regtabs">
+    <button class="regtab active" data-reg="sii">תו ירוק (SII)<span class="sub">מכון התקנים — תו תקן</span></button>
+    <button class="regtab" data-reg="mii">תוצרת הארץ<span class="sub">מיוצר בישראל</span></button>
+  </div>
 
   <div id="drop" class="drop">
     <div class="ic">📄</div>
@@ -249,6 +263,19 @@ const STATUS = {
   review:   {cls:"rv", label:"לבדיקה"},
   not_found:{cls:"no", label:"לא נמצא תקן"},
 };
+
+// Active registry: "sii" (green-label/תו תקן) or "mii" (תוצרת הארץ). Complete
+// separation — each mode shows ONLY its own result, controls and links.
+let REG = "sii";
+try { REG = localStorage.getItem("reg") || "sii"; } catch(e){}
+
+function miiState(p){
+  if(p.made_in_israel)        return {cls:"ok", label:"תוצרת הארץ", key:"approved"};
+  if(p.mii_status==="review") return {cls:"rv", label:"ייתכן — לבדיקה", key:"review"};
+  return {cls:"no", label:"לא נמצא", key:"not_found"};
+}
+function regState(p){ return REG==="mii" ? miiState(p) : (STATUS[p.status] || STATUS.not_found); }
+function regKey(p){   return REG==="mii" ? miiState(p).key : (p.status || "not_found"); }
 
 function toast(msg){
   const t = $("#toast"); t.textContent = msg; t.classList.add("show");
@@ -329,15 +356,8 @@ $("#check").addEventListener("click", async ()=>{
 });
 
 // ---- render results ----
-function render(receipts){
-  let ok=0, rv=0, no=0;
-  receipts.forEach(r => (r.products||[]).forEach(p=>{
-    if(p.status==="approved") ok++; else if(p.status==="review") rv++; else no++;
-  }));
-  $("#nOk").textContent=ok; $("#nRv").textContent=rv; $("#nNo").textContent=no;
-  $("#summary").classList.add("show");
-
-  $("#results").innerHTML = receipts.map((r,ri)=>{
+function resultsHTML(){
+  return (window.__data||[]).map((r,ri)=>{
     const items = (r.products||[]).map((p,pi)=>itemHTML(p,ri,pi)).join("");
     const errLine = r.error ? `<div class="item err">לא ניתן לקרוא קובץ זה: ${r.error}</div>` : "";
     return `<div class="receipt">
@@ -345,94 +365,110 @@ function render(receipts){
         ${items || errLine || '<div class="item err">לא זוהו מוצרים בתעודה זו.</div>'}
       </div>`;
   }).join("");
+}
+function render(receipts){
   window.__data = receipts;
-  updateVpack();
+  $("#summary").classList.add("show");
+  $("#results").innerHTML = resultsHTML();
+  recount();
   $("#results").scrollIntoView({behavior:"smooth", block:"start"});
 }
+function updateSummaryLabels(){
+  const labels = REG==="mii"
+    ? ["תוצרת הארץ", "ייתכן — לבדיקה", "לא נמצא"]
+    : ["מאושר — תו תקן", "לבדיקה ידנית", "לא נמצא תקן"];
+  document.querySelectorAll("#summary .stat .lbl").forEach((el,i)=>{ if(labels[i]) el.textContent=labels[i]; });
+}
+function applyReg(reg){
+  REG = reg;
+  try { localStorage.setItem("reg", reg); } catch(e){}
+  document.querySelectorAll("#regtabs .regtab").forEach(b=>b.classList.toggle("active", b.dataset.reg===reg));
+  updateSummaryLabels();
+  if(window.__data){ $("#results").innerHTML = resultsHTML(); recount(); }
+}
+document.querySelectorAll("#regtabs .regtab").forEach(b=>{
+  b.classList.toggle("active", b.dataset.reg===REG);
+  b.addEventListener("click", ()=>applyReg(b.dataset.reg));
+});
+updateSummaryLabels();
 
 function pct(x){ return Math.round((x||0)*100); }
 function confColor(s){ return s==="approved"?"var(--green)":s==="review"?"var(--amber)":"var(--red)"; }
 
 function itemHTML(p, ri, pi){
-  const st = STATUS[p.status] || STATUS.not_found;
   const name = p.query || "";
-  const permit = p.permit
-    ? `<span class="permit" data-permit="${esc(String(p.permit))}" onclick="copyPermit(this.dataset.permit)" title="העתק מספר היתר">
-         <span class="c">היתר</span>${esc(String(p.permit))}</span>` : "";
-  const manuf = p.manufacturer
-    ? `<span><span class="k">יצרן:</span> <span class="v">${esc(p.manufacturer)}</span></span>` : "";
-  const matched = (p.matched_name && p.status!=="not_found")
-    ? `<span><span class="k">זוהה כ־</span> <span class="v">${esc(p.matched_name)}</span></span>` : "";
-  const conf = p.verified ? `
-    <div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>` : `
-    <div class="conf">
-      <div class="bar"><div class="fill" style="width:${pct(p.confidence)}%;background:${confColor(p.status)}"></div></div>
-      <div class="lbl">רמת התאמה ${pct(p.confidence)}%</div>
-    </div>`;
-  const mii = p.made_in_israel ? `
-    <div class="mii">
-      <span class="flag">🇮🇱</span><b>תוצרת הארץ</b>
-      <span style="color:var(--ink-soft)">— מופיע במאגר הרשמי</span>
-      ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">צפה במאגר ↗</a>` : ""}
-    </div>` : (p.mii_status === "review" ? `
-    <div class="mii review">
-      <span class="flag">🇮🇱</span><b>ייתכן תוצרת הארץ — לבדיקה</b>
-      <span style="color:var(--ink-soft)">${p.mii_matched_name ? "התאמה אפשרית: " + esc(p.mii_matched_name) : ""}</span>
-      ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">בדקו במאגר ↗</a>` : ""}
-    </div>` : "");
-
-  const vbadge = p.verified ? `<span class="vbadge">✔ אומת</span>` : "";
-  const confirmrow = p.verified ? `
-      <div class="confirmrow ok">✔ אומת ידנית מול המאגר
-        <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>` : `
-      <div class="confirmrow">
-        <span class="ask">התוצאה נכונה?</span>
-        <button class="vbtn yes" onclick="confirmCorrect(${ri},${pi})">✓ נכון</button>
-        <button class="vbtn no" onclick="startWrong(${ri},${pi})">✗ שגוי</button>
-      </div>
-      <div class="editbar" id="wrong-eb-${ri}-${pi}">
-        <input id="wrong-in-${ri}-${pi}" type="text" inputmode="numeric" placeholder="מספר היתר נכון מהמאגר">
-        <label><input type="checkbox" id="wrong-nc-${ri}-${pi}"> אין תו תקן</label>
-        <button class="save" onclick="saveWrong(${ri},${pi})">שמור</button>
-        <button class="cancel" onclick="cancelWrong(${ri},${pi})">ביטול</button>
-      </div>`;
-
+  const rs = regState(p);
+  const isVer = REG==="mii" ? !!p.mii_verified : !!p.verified;
+  const vbadge = isVer ? `<span class="vbadge">✔ אומת</span>` : "";
+  const body = REG==="mii" ? miiBody(p,ri,pi) : siiBody(p,ri,pi);
   return `<div class="item" id="it-${ri}-${pi}">
       <div class="row1">
         <div class="pname" id="nm-${ri}-${pi}">${esc(name)}</div>
-        <span class="pill ${st.cls}">${st.label}</span>${vbadge}
+        <span class="pill ${rs.cls}">${rs.label}</span>${vbadge}
       </div>
-      ${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}
-      ${conf}
-      ${mii}
-      <div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
-        ${p.official_url
-          ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>`
-          : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
-        <a href="https://www.sii.org.il/he/certificationssearch?approveType=181&auto=true&query=${encodeURIComponent(p.permit != null ? String(p.permit) : (p.matched_name || p.query || ""))}"
-           target="_blank" rel="noopener">חיפוש במאגר SII ↗</a>
-        ${p.link_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
-        <button class="linkbtn" onclick="startLinkEdit(${ri},${pi})">✎ ערוך ואמת קישור</button>
-      </div>
-      <div class="editbar" id="lk-eb-${ri}-${pi}">
-        <input id="lk-in-${ri}-${pi}" type="url" dir="ltr" style="text-align:left"
-               value="${esc(p.official_url || "")}" placeholder="https://... הדביקו את הקישור הנכון">
-        <button class="save" onclick="saveLinkEdit(${ri},${pi})">שמור ואמת קישור</button>
-        <button class="cancel" onclick="cancelLinkEdit(${ri},${pi})">ביטול</button>
-      </div>
-      ${confirmrow}
-      <div style="margin-top:8px"><button class="linkbtn" onclick="startMiiEdit(${ri},${pi})">✎ ערוך שם לבדיקת תוצרת הארץ</button></div>
-      <div class="editbar" id="mii-eb-${ri}-${pi}">
-        <input id="mii-in-${ri}-${pi}" type="text" value="${esc(p.mii_query || p.query || "")}" placeholder="שם לחיפוש במאגר תוצרת הארץ">
-        <button class="save" onclick="saveMiiEdit(${ri},${pi})">בדוק מחדש</button>
-        <button class="cancel" onclick="cancelMiiEdit(${ri},${pi})">ביטול</button>
-      </div>
+      ${body}
       <div style="margin-top:10px"><button class="linkbtn" onclick="startEdit(${ri},${pi})">✎ ערוך שם מוצר ובדוק מחדש</button></div>
       <div class="editbar" id="eb-${ri}-${pi}">
         <button class="save" onclick="saveEdit(${ri},${pi})">בדוק מחדש</button>
         <button class="cancel" onclick="cancelEdit(${ri},${pi})">ביטול</button>
       </div>
     </div>`;
+}
+
+// ---- SII (green-label / תו תקן) body ----
+function siiBody(p, ri, pi){
+  const permit = p.permit
+    ? `<span class="permit" data-permit="${esc(String(p.permit))}" onclick="copyPermit(this.dataset.permit)" title="העתק מספר היתר"><span class="c">היתר</span>${esc(String(p.permit))}</span>` : "";
+  const manuf = p.manufacturer
+    ? `<span><span class="k">יצרן:</span> <span class="v">${esc(p.manufacturer)}</span></span>` : "";
+  const matched = (p.matched_name && p.status!=="not_found")
+    ? `<span><span class="k">זוהה כ־</span> <span class="v">${esc(p.matched_name)}</span></span>` : "";
+  const conf = p.verified
+    ? `<div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>`
+    : `<div class="conf"><div class="bar"><div class="fill" style="width:${pct(p.confidence)}%;background:${confColor(p.status)}"></div></div><div class="lbl">רמת התאמה ${pct(p.confidence)}%</div></div>`;
+  const searchUrl = "https://www.sii.org.il/he/certificationssearch?approveType=181&auto=true&query=" + encodeURIComponent(p.permit != null ? String(p.permit) : (p.matched_name || p.query || ""));
+  const linkrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${p.cert_url ? `<a href="${esc(p.cert_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>` : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
+        <a href="${esc(searchUrl)}" target="_blank" rel="noopener">חיפוש במאגר SII ↗</a>
+        ${p.cert_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
+        <button class="linkbtn" onclick="startLinkEdit(${ri},${pi})">✎ ערוך ואמת קישור</button>
+      </div>
+      <div class="editbar" id="lk-eb-${ri}-${pi}">
+        <input id="lk-in-${ri}-${pi}" type="url" dir="ltr" style="text-align:left" value="${esc(p.cert_url || "")}" placeholder="https://... הדביקו את הקישור הנכון">
+        <button class="save" onclick="saveLinkEdit(${ri},${pi})">שמור ואמת קישור</button>
+        <button class="cancel" onclick="cancelLinkEdit(${ri},${pi})">ביטול</button>
+      </div>`;
+  const confirmrow = p.verified
+    ? `<div class="confirmrow ok">✔ אומת ידנית מול המאגר <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>`
+    : `<div class="confirmrow"><span class="ask">התוצאה נכונה?</span><button class="vbtn yes" onclick="confirmCorrect(${ri},${pi})">✓ נכון</button><button class="vbtn no" onclick="startWrong(${ri},${pi})">✗ שגוי</button></div>
+      <div class="editbar" id="wrong-eb-${ri}-${pi}"><input id="wrong-in-${ri}-${pi}" type="text" inputmode="numeric" placeholder="מספר היתר נכון מהמאגר"><label><input type="checkbox" id="wrong-nc-${ri}-${pi}"> אין תו תקן</label><button class="save" onclick="saveWrong(${ri},${pi})">שמור</button><button class="cancel" onclick="cancelWrong(${ri},${pi})">ביטול</button></div>`;
+  return `${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}${conf}${linkrow}${confirmrow}`;
+}
+
+// ---- MII (Made-in-Israel / תוצרת הארץ) body ----
+function miiBody(p, ri, pi){
+  const ms = miiState(p);
+  const matched = (p.mii_matched_name && ms.key!=="not_found")
+    ? `<span><span class="k">זוהה כ־</span> <span class="v">${esc(p.mii_matched_name)}</span></span>` : "";
+  const conf = p.mii_verified
+    ? `<div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>`
+    : `<div class="conf"><div class="bar"><div class="fill" style="width:${pct(p.mii_confidence)}%;background:${confColor(ms.key)}"></div></div><div class="lbl">רמת התאמה ${pct(p.mii_confidence)}%</div></div>`;
+  const linkrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">צפה במאגר תוצרת הארץ ↗</a>` : `<span style="color:var(--ink-soft)">אין קישור</span>`}
+        ${p.mii_link_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
+        <button class="linkbtn" onclick="startLinkEdit(${ri},${pi})">✎ ערוך ואמת קישור</button>
+      </div>
+      <div class="editbar" id="lk-eb-${ri}-${pi}">
+        <input id="lk-in-${ri}-${pi}" type="url" dir="ltr" style="text-align:left" value="${esc(p.official_url || "")}" placeholder="https://... קישור למאגר תוצרת הארץ">
+        <button class="save" onclick="saveLinkEdit(${ri},${pi})">שמור ואמת קישור</button>
+        <button class="cancel" onclick="cancelLinkEdit(${ri},${pi})">ביטול</button>
+      </div>`;
+  const confirmrow = p.mii_verified
+    ? `<div class="confirmrow ok">✔ אומת ידנית · תוצרת הארץ <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>`
+    : `<div class="confirmrow"><span class="ask">תוצרת הארץ?</span><button class="vbtn yes" onclick="confirmMii(${ri},${pi})">✓ כן</button><button class="vbtn no" onclick="rejectMii(${ri},${pi})">✗ לא</button></div>`;
+  const reedit = `<div style="margin-top:8px"><button class="linkbtn" onclick="startMiiEdit(${ri},${pi})">✎ ערוך שם לבדיקה מחדש</button></div>
+      <div class="editbar" id="mii-eb-${ri}-${pi}"><input id="mii-in-${ri}-${pi}" type="text" value="${esc(p.mii_query || p.query || "")}" placeholder="שם לחיפוש במאגר תוצרת הארץ"><button class="save" onclick="saveMiiEdit(${ri},${pi})">בדוק מחדש</button><button class="cancel" onclick="cancelMiiEdit(${ri},${pi})">ביטול</button></div>`;
+  return `${matched ? `<div class="meta">${matched}</div>` : ""}${conf}${linkrow}${confirmrow}${reedit}`;
 }
 
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -523,18 +559,37 @@ window.saveLinkEdit = async (ri,pi)=>{
   $(`#lk-eb-${ri}-${pi}`).classList.remove("show");
   if(!url){ toast("הדביקו קישור תקין"); return; }
   if(!/^https?:\/\//i.test(url)){ toast("הקישור חייב להתחיל ב־http"); return; }
-  p.official_url = url;
-  p.link_verified = true;
+  // Separate link fields per registry: SII cert link vs MII registry link.
+  if(REG==="mii"){ p.official_url = url; p.mii_link_verified = true; p.mii_verified = true; }
+  else           { p.cert_url = url;     p.cert_verified = true;     p.verified = true;     }
   p.verified_at = new Date().toISOString();
   try{
-    // Persist the human-verified link into the shared memory (aliases the
-    // original OCR read too, so the whole answer returns next time).
     await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
-    p.verified = true;
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
     recount(); toast("הקישור אומת ונשמר בזיכרון");
   }catch(e){ toast("שגיאה בשמירת הקישור"); }
+};
+// ---- MII (תוצרת הארץ) confirm / reject ----
+window.confirmMii = async (ri,pi)=>{
+  const p = {...window.__data[ri].products[pi]};
+  p.made_in_israel=true; p.mii_status="confirmed"; p.mii_confidence=1; p.mii_verified=true;
+  p.verified_at=new Date().toISOString();
+  try{
+    await postConfirm({original:p.original_read||p.query, corrected:p.query, record:p});
+    window.__data[ri].products[pi]=p; $(`#it-${ri}-${pi}`).outerHTML=itemHTML(p,ri,pi);
+    recount(); toast("אומת: תוצרת הארץ");
+  }catch(e){ toast("שגיאה בשמירה"); }
+};
+window.rejectMii = async (ri,pi)=>{
+  const p = {...window.__data[ri].products[pi]};
+  p.made_in_israel=false; p.mii_status="none"; p.mii_confidence=0; p.mii_matched_name=null; p.official_url=""; p.mii_verified=true;
+  p.verified_at=new Date().toISOString();
+  try{
+    await postConfirm({original:p.original_read||p.query, corrected:p.query, record:p});
+    window.__data[ri].products[pi]=p; $(`#it-${ri}-${pi}`).outerHTML=itemHTML(p,ri,pi);
+    recount(); toast("סומן: לא תוצרת הארץ");
+  }catch(e){ toast("שגיאה בשמירה"); }
 };
 window.startWrong  = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.add("show"); $(`#wrong-in-${ri}-${pi}`).focus(); };
 window.cancelWrong = (ri,pi)=>{ $(`#wrong-eb-${ri}-${pi}`).classList.remove("show"); };
@@ -570,15 +625,17 @@ window.unconfirm = async (ri,pi)=>{
 function recount(){
   let ok=0,rv=0,no=0;
   (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{
-    if(p.status==="approved")ok++; else if(p.status==="review")rv++; else no++;}));
+    const k=regKey(p);
+    if(k==="approved")ok++; else if(k==="review")rv++; else no++;}));
   $("#nOk").textContent=ok; $("#nRv").textContent=rv; $("#nNo").textContent=no;
+  updateSummaryLabels();
   updateVpack();
 }
 
 /* ============ verified-certificates pack: screenshots -> ZIP ============ */
 function verifiedList(){
   const out=[];
-  (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{ if(p.verified) out.push({p, file:r.file}); }));
+  (window.__data||[]).forEach(r=>(r.products||[]).forEach(p=>{ if(p.verified || p.mii_verified) out.push({p, file:r.file}); }));
   return out;
 }
 function updateVpack(){
@@ -632,7 +689,7 @@ function proofCard(p,file,idx,total){
      </div>
      <div style="margin-top:18px;padding:14px 16px;background:#ffffff;border:1px solid #e3e0d8;border-radius:10px">
        <div style="color:#586173;font-size:12px;margin-bottom:5px">קישור לתעודה${p.link_verified?" · אומת ✔":""}</div>
-       <div dir="ltr" style="text-align:left;font-size:12.5px;word-break:break-all;color:#0a4ea3">${esc(p.official_url||"— אין קישור —")}</div>
+       <div dir="ltr" style="text-align:left;font-size:12.5px;word-break:break-all;color:#0a4ea3">${esc(p.cert_url || p.official_url || "— אין קישור —")}</div>
      </div>
      <div style="margin-top:18px;display:flex;justify-content:space-between;align-items:center;border-top:1px solid #e3e0d8;padding-top:14px;color:#586173;font-size:12.5px">
        <div>✔ אומת ידנית · ${when.toLocaleString("he-IL")}</div>
