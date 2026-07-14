@@ -274,6 +274,25 @@ class CertMatcher:
             return None, 0.0
         return best, self._confidence(qtok, best["tokens"])  # report display confidence
 
+    @staticmethod
+    def _separate_links(rec):
+        """Keep the two registries' links apart. Legacy records (saved before the
+        SII/MII split) put an SII certificate link into official_url — the MII
+        field. Move any sii.org.il link to cert_url and clear it from the MII
+        side, at read time, so nothing bleeds across. Idempotent."""
+        ou = rec.get("official_url") or ""
+        if "sii.org.il" in ou:
+            if not rec.get("cert_url"):
+                rec["cert_url"] = ou
+            rec["official_url"] = None
+        # symmetric guard: a buyisrael link never belongs on the SII side
+        cu = rec.get("cert_url") or ""
+        if "buyisrael" in cu:
+            if not rec.get("official_url"):
+                rec["official_url"] = cu
+            rec["cert_url"] = None
+        return rec
+
     def match(self, raw_name: str) -> dict:
         qtok = self._qtokens(normalize(raw_name))
         result = {"query": raw_name, "status": STATUS_NOT_FOUND, "confidence": 0.0,
@@ -289,7 +308,7 @@ class CertMatcher:
                 rec = dict(result)
                 rec.update(mem)
                 rec["query"] = raw_name
-                return rec
+                return self._separate_links(rec)
 
         if not qtok:
             return result
@@ -317,7 +336,7 @@ class CertMatcher:
                 # Do NOT assert origin and do NOT borrow the manufacturer.
                 result["mii_status"] = "review"
 
-        return result
+        return self._separate_links(result)
 
     def _persist_verified(self):
         if not self.verified_path:
