@@ -99,6 +99,17 @@ Hebrew prepositions **ב / ל / מ / כ / ש** attach directly to the next word 
 
 The difference between "עמיד במים" and "עמיד מים" matters for database matching.
 
+## Abbreviation Expansion — Critical
+
+Delivery notes abbreviate common words with a dot (`.`). ALWAYS expand the abbreviation to the full word — the certification database stores the full spelling, so a bare abbreviation fails to match.
+
+| Abbrev | Full word | Read it as |
+|---|---|---|
+| **צ.** | צמר (mineral/glass wool) | `צ.זכוכית` → **צמר זכוכית** · `צ.סלעים` → **צמר סלעים** · `צ.מינרלי` → **צמר מינרלי** |
+| **ע.** | עמיד (resistant) | `ע. מים` → **עמיד במים** (with the preposition ב, per the rule above) · `ע.אש` → **עמיד אש** |
+
+Rule: a lone Hebrew letter followed by a dot is an abbreviation — expand it to the full word, never emit the bare letter. Keep the rest of the product name (brand, model, grade) exactly as written. If unsure what the letter stands for, expand to your best reading rather than leaving the dot-letter.
+
 ## Known Israeli Building Material Brands — Sanity Check
 
 Use these to verify your reading when a name looks unusual:

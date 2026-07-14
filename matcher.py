@@ -82,6 +82,15 @@ _STOPWORDS = {
 }
 
 
+# Domain abbreviations written with a dot on Israeli delivery notes, expanded so
+# the reader's literal text meets the DB spelling. "צ.זכוכית" -> "צמר זכוכית",
+# "ע. מים" -> "עמיד מים". Applied token-wise inside normalize() on BOTH sides.
+_ABBREV = {
+    "צ": "צמר",   # צמר (wool): צ.זכוכית / צ.סלעים / צ.מינרלי
+    "ע": "עמיד",  # עמיד (resistant): ע. מים = עמיד מים
+}
+
+
 def normalize(text: str) -> str:
     if not text:
         return ""
@@ -89,8 +98,10 @@ def normalize(text: str) -> str:
     text = _NIQQUD.sub("", text)
     text = text.lower()
     text = _split_boundaries(text)
-    text = _NON_WORD.sub(" ", text)
-    return text.strip()
+    text = _NON_WORD.sub(" ", text).strip()
+    if _ABBREV:
+        text = " ".join(_ABBREV.get(w, w) for w in text.split())
+    return text
 
 
 # Field text often glues a model code ("MP10") that the DB writes split ("MP-10"/"MP 10").
@@ -104,11 +115,16 @@ def _tokens(norm_text: str) -> frozenset:
     for t in norm_text.split():
         if not t or t in _STOPWORDS:
             continue
-        out.add(t)
         m = _ALNUM_SPLIT.match(t)
         if m:
+            # "FL810" -> "fl","810": emit the split halves ONLY (drop the glued
+            # form) so a jammed model code tokenizes exactly like the spaced
+            # "FL 810" the SII DB stores. Keeping the glued token inflated the
+            # query token count and pushed real matches below the approve threshold.
             out.add(m.group(1))
             out.add(m.group(2))
+        else:
+            out.add(t)
     return frozenset(out)
 
 
