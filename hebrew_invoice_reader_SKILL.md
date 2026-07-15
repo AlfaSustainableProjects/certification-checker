@@ -109,6 +109,7 @@ Delivery notes abbreviate common words with a dot (`.`). ALWAYS expand the abbre
 | Abbrev | Full word | Read it as |
 |---|---|---|
 | **צ.** | צמר (mineral/glass wool) | `צ.זכוכית` → **צמר זכוכית** · `צ.סלעים` → **צמר סלעים** · `צ.מינרלי` → **צמר מינרלי** |
+| **צ.ז.** | צמר זכוכית (glass wool) | `צ.ז. לוח שחור` → **צמר זכוכית לוח שחור** — a two-letter abbreviation: each letter starts a word |
 | **ע.** | עמיד (resistant) | `ע. מים` → **עמיד במים** (with the preposition ב, per the rule above) · `ע.אש` → **עמיד אש** |
 
 Rule: a lone Hebrew letter followed by a dot is an abbreviation — expand it to the full word, never emit the bare letter. Keep the rest of the product name (brand, model, grade) exactly as written. If unsure what the letter stands for, expand to your best reading rather than leaving the dot-letter.

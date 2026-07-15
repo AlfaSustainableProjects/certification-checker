@@ -90,6 +90,23 @@ _ABBREV = {
     "ע": "עמיד",  # עמיד (resistant): ע. מים = עמיד מים
 }
 
+# Multi-letter dotted abbreviations, where each letter starts a word:
+# "צ.ז" -> צמר זכוכית. Checked BEFORE the single-letter map, otherwise "צ"
+# would expand first and the pair would no longer match.
+_ABBREV_SEQ = {
+    ("צ", "ז"): ("צמר", "זכוכית"),
+}
+
+
+def _expand_abbrev(words):
+    out, i = [], 0
+    while i < len(words):
+        pair = (words[i], words[i + 1]) if i + 1 < len(words) else None
+        if pair is not None and pair in _ABBREV_SEQ:
+            out.extend(_ABBREV_SEQ[pair]); i += 2; continue
+        out.append(_ABBREV.get(words[i], words[i])); i += 1
+    return out
+
 
 def normalize(text: str) -> str:
     if not text:
@@ -99,8 +116,7 @@ def normalize(text: str) -> str:
     text = text.lower()
     text = _split_boundaries(text)
     text = _NON_WORD.sub(" ", text).strip()
-    if _ABBREV:
-        text = " ".join(_ABBREV.get(w, w) for w in text.split())
+    text = " ".join(_expand_abbrev(text.split()))
     return text
 
 
@@ -115,6 +131,8 @@ def _tokens(norm_text: str) -> frozenset:
     for t in norm_text.split():
         if not t or t in _STOPWORDS:
             continue
+        if len(t) == 1 and not t.isdigit():
+            continue  # stray abbreviation letter (ג.ש / ס"מ) -> noise, not a product token
         m = _ALNUM_SPLIT.match(t)
         if m:
             # "FL810" -> "fl","810": emit the split halves ONLY (drop the glued
