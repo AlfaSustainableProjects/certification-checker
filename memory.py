@@ -254,7 +254,16 @@ class Memory:
         ans["query"] = raw
         if not ans.get("matched_name"):
             ans["matched_name"] = e.get("canonical")
-        ans["verified"] = True
+        # "verified" (the SII-side flag) is intentionally NOT persisted as raw
+        # data — learn() strips it before storing. It's derived here instead,
+        # from whether this entry carries genuine SII-confirmation evidence
+        # (a status/permit set by a human confirm, or a verified cert link).
+        # This is deliberate, not a legacy shim: without it, a product that was
+        # ONLY ever confirmed on the MII side would be mistaken for an
+        # SII-verified one too, since both registries share the same memory
+        # entry. mii_verified / mii_link_verified / cert_verified ARE stored
+        # as-is and never derived — they reflect exactly what was confirmed.
+        ans["verified"] = bool(ans.get("status") or ans.get("permit") is not None or ans.get("cert_verified"))
         ans["from_memory"] = True
         return ans
 

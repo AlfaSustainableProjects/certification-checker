@@ -453,6 +453,16 @@ function miiBody(p, ri, pi){
   const conf = p.mii_verified
     ? `<div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>`
     : `<div class="conf"><div class="bar"><div class="fill" style="width:${pct(p.mii_confidence)}%;background:${confColor(ms.key)}"></div></div><div class="lbl">רמת התאמה ${pct(p.mii_confidence)}%</div></div>`;
+  // The Made-in-Israel site (buyisrael.economy.gov.il) has no URL-based search
+  // — confirmed: its Angular app ignores query parameters entirely, search
+  // state lives only in-memory after typing in its own box. So the closest
+  // one-click equivalent to the SII search link is: open the site + copy the
+  // product name, so the user pastes it into the site's search box themselves.
+  const searchName = esc((p.mii_query || p.query || "").replace(/'/g, "&#39;"));
+  const searchrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
+        <a href="https://buyisrael.economy.gov.il/" target="_blank" rel="noopener" onclick="copyProductName('${searchName}')">פתחו את אתר תוצרת הארץ ↗</a>
+        <button class="linkbtn" onclick="copyProductName('${searchName}')">📋 העתיקו שם מוצר לחיפוש</button>
+      </div>`;
   const linkrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${p.official_url ? `<a href="${esc(p.official_url)}" target="_blank" rel="noopener">צפה במאגר תוצרת הארץ ↗</a>` : `<span style="color:var(--ink-soft)">אין קישור</span>`}
         ${p.mii_link_verified ? `<span style="color:var(--green);font-weight:600">✔ קישור מאומת</span>` : ""}
@@ -468,12 +478,17 @@ function miiBody(p, ri, pi){
     : `<div class="confirmrow"><span class="ask">תוצרת הארץ?</span><button class="vbtn yes" onclick="confirmMii(${ri},${pi})">✓ כן</button><button class="vbtn no" onclick="rejectMii(${ri},${pi})">✗ לא</button></div>`;
   const reedit = `<div style="margin-top:8px"><button class="linkbtn" onclick="startMiiEdit(${ri},${pi})">✎ ערוך שם לבדיקה מחדש</button></div>
       <div class="editbar" id="mii-eb-${ri}-${pi}"><input id="mii-in-${ri}-${pi}" type="text" value="${esc(p.mii_query || p.query || "")}" placeholder="שם לחיפוש במאגר תוצרת הארץ"><button class="save" onclick="saveMiiEdit(${ri},${pi})">בדוק מחדש</button><button class="cancel" onclick="cancelMiiEdit(${ri},${pi})">ביטול</button></div>`;
-  return `${matched ? `<div class="meta">${matched}</div>` : ""}${conf}${linkrow}${confirmrow}${reedit}`;
+  return `${matched ? `<div class="meta">${matched}</div>` : ""}${conf}${searchrow}${linkrow}${confirmrow}${reedit}`;
 }
 
 function esc(s){ return (s==null?"":String(s)).replace(/[&<>"]/g, c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
 
 window.copyPermit = p => { navigator.clipboard.writeText(String(p)); toast("מספר היתר הועתק: "+p); };
+window.copyProductName = name => {
+  const n = String(name||"").replace(/&#39;/g, "'");
+  if(!n) return;
+  navigator.clipboard.writeText(n).then(()=>toast("שם המוצר הועתק — הדביקו בתיבת החיפוש באתר"));
+};
 
 window.startEdit = (ri,pi)=>{
   const nm = $(`#nm-${ri}-${pi}`);
@@ -542,10 +557,10 @@ async function postConfirm(body){
 window.confirmCorrect = async (ri,pi)=>{
   const p = {...window.__data[ri].products[pi]};
   if(p.permit){ p.status="approved"; p.confidence=1; }   // confirming a permit = approved
+  p.verified = true;
   p.verified_at = new Date().toISOString();
   try{
     await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
-    p.verified = true;
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
     recount(); toast("אומת ונשמר");
@@ -601,10 +616,10 @@ window.saveWrong = async (ri,pi)=>{
   $(`#wrong-eb-${ri}-${pi}`).classList.remove("show");
   if(notCert){ p.status="not_found"; p.permit=null; p.matched_name=null; p.confidence=0; }
   else { p.status="approved"; p.permit=permit; p.matched_name=p.matched_name||p.query; p.confidence=1; }
+  p.verified = true;
   p.verified_at = new Date().toISOString();
   try{
     await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
-    p.verified = true;
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
     recount(); toast("התיקון אומת ונשמר");

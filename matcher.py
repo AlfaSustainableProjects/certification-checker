@@ -56,9 +56,13 @@ STATUS_REVIEW = "review"
 STATUS_NOT_FOUND = "not_found"
 
 # The full shape of a match result, used to sanitize stored verified answers.
+# Includes the per-registry verification flags (verified / cert_verified for
+# SII, mii_verified / mii_link_verified for MII) so a human confirmation on
+# EITHER side survives being served back out of memory later.
 RESULT_KEYS = ("query", "status", "confidence", "permit", "manufacturer",
                "matched_name", "cert_url", "made_in_israel", "mii_confidence",
-               "official_url", "mii_status", "mii_matched_name")
+               "official_url", "mii_status", "mii_matched_name",
+               "verified", "cert_verified", "mii_verified", "mii_link_verified")
 
 _NIQQUD = re.compile(r"[\u0591-\u05C7]")
 _NON_WORD = re.compile(r"[^\u05D0-\u05EAa-z0-9]+")
