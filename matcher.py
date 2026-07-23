@@ -350,6 +350,26 @@ class CertMatcher:
             return None  # hint itself doesn't clearly favor one candidate
         return scored[0][1]
 
+    def _hint_disagrees(self, hint, entry) -> bool:
+        """True if a supplied manufacturer hint clearly does NOT match the
+        single winning entry's company. Ties are handled by
+        _resolve_by_manufacturer; this covers the OTHER case — only one
+        candidate scored highest (no competing company), so no ambiguity was
+        ever flagged — but a confident name-token match can still be the
+        wrong product if the name is generic (e.g. two unrelated products
+        both scoring on a shared short token like a model number). A hint
+        that plainly doesn't recognize the matched company is a real signal
+        that match deserves a human glance rather than silent approval."""
+        if not hint:
+            return False
+        htok = self._qtokens(normalize(hint))
+        if not htok:
+            return False
+        ctok = frozenset(_tokens(normalize(entry.get("company") or "")))
+        if not ctok:
+            return False  # nothing on record to compare the hint against
+        return self._score(htok, ctok) < HINT_RESOLVE_THRESHOLD
+
     @staticmethod
     def _separate_links(rec):
         """Keep the two registries' links apart. Legacy records (saved before the
@@ -375,7 +395,8 @@ class CertMatcher:
                   "permit": None, "manufacturer": None, "matched_name": None,
                   "cert_url": None, "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
                   "mii_status": "none", "mii_matched_name": None,
-                  "ambiguous": False, "candidates": []}
+                  "ambiguous": False, "candidates": [],
+                  "manufacturer_mismatch": False, "hint_manufacturer": None}
 
         # 1) Learned memory wins outright: exact alias (fixes a repeated misread)
         #    + fuzzy recall (tolerates OCR variance). Human-verified & shared.
@@ -397,6 +418,7 @@ class CertMatcher:
             result["confidence"] = round(sii_s, 3)
             if sii_s >= REVIEW_THRESHOLD:
                 chosen = sii_hit
+                mismatch = False
                 if sii_ties:
                     # Same product name, 2+ companies. Try the manufacturer
                     # hint (from the reader or a human edit) to pick one;
@@ -413,30 +435,50 @@ class CertMatcher:
                              "matched_name": e.get("name")}
                             for _, e in [(sii_s, sii_hit)] + sii_ties
                         ]
+                elif manufacturer_hint:
+                    # Only ONE company scored on this name — no tie was ever
+                    # detected — but a confident single match can still be the
+                    # WRONG product if the name is generic (two unrelated
+                    # products both hitting a shared short token). If the
+                    # supplied manufacturer plainly doesn't recognize the
+                    # company we found, that's a real signal, not noise —
+                    # surface it instead of silently approving.
+                    if self._hint_disagrees(manufacturer_hint, chosen):
+                        mismatch = True
+                        result["manufacturer_mismatch"] = True
+                        result["hint_manufacturer"] = manufacturer_hint
                 result["matched_name"] = chosen["name"]
                 result["permit"] = chosen["permit"]
                 result["manufacturer"] = chosen["company"]
                 result["status"] = (STATUS_APPROVED
-                                     if sii_s >= APPROVED_THRESHOLD and not result["ambiguous"]
+                                     if sii_s >= APPROVED_THRESHOLD and not result["ambiguous"] and not mismatch
                                      else STATUS_REVIEW)
 
         mii_hit, mii_s, mii_ties = self._best(self.mii, qtok)
         if mii_hit and mii_s >= MII_REVIEW_THRESHOLD:
             result["mii_confidence"] = round(mii_s, 3)
             mii_chosen = mii_hit
+            mii_mismatch = False
             if mii_ties:  # not observed in practice today (0 MII name collisions), kept for correctness
                 resolved = self._resolve_by_manufacturer(manufacturer_hint, [(mii_s, mii_hit)] + mii_ties)
                 if resolved is not None:
                     mii_chosen = resolved
+            elif manufacturer_hint and self._hint_disagrees(manufacturer_hint, mii_chosen):
+                # Same false-positive risk as SII: a confident single match on
+                # a generic name could still be the wrong maker.
+                mii_mismatch = True
+                result["manufacturer_mismatch"] = True
+                result["hint_manufacturer"] = manufacturer_hint
             result["mii_matched_name"] = mii_chosen["name"]
             result["official_url"] = mii_chosen["url"] or None
-            if mii_s >= MII_THRESHOLD:
+            if mii_s >= MII_THRESHOLD and not mii_mismatch:
                 # Confident: assert תוצרת הארץ.
                 result["made_in_israel"] = True
                 result["mii_status"] = "confirmed"
             else:
-                # Borderline: surface the candidate + link for a human glance.
-                # Do NOT assert origin and do NOT borrow the manufacturer.
+                # Borderline (or manufacturer mismatch): surface the candidate
+                # + link for a human glance. Do NOT assert origin and do NOT
+                # borrow the manufacturer.
                 result["mii_status"] = "review"
 
         return self._separate_links(result)

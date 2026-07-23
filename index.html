@@ -439,6 +439,15 @@ function siiBody(p, ri, pi){
           <button class="vbtn yes" onclick="pickManufacturer(${ri},${pi},${ci})">בחרו</button>
         </div>`).join("")}
     </div>` : "";
+  // A single confident name match, but the supplied manufacturer (from the
+  // reader, or a human edit) doesn't recognize the company we found — could
+  // be a generic name coincidentally matching an unrelated product. Not the
+  // same as ambiguous (no competing company tied on the name at all).
+  const mismatchPanel = (!p.verified && !p.ambiguous && p.manufacturer_mismatch) ? `
+    <div style="margin-top:10px;padding:10px 12px;background:var(--amber-bg);border:1px solid var(--amber-line);border-radius:10px">
+      <div style="font-weight:600;color:var(--amber);font-size:13px">⚠ אי-התאמת יצרן</div>
+      <div style="font-size:13px;margin-top:3px">היצרן שצוין הוא <b>${esc(p.hint_manufacturer||"")}</b>, אך ההתאמה הקרובה ביותר במאגר היא <b>${esc(p.manufacturer||"")}</b> — בדקו שזו אכן ההתאמה הנכונה.</div>
+    </div>` : "";
   const searchUrl = "https://www.sii.org.il/he/certificationssearch?approveType=181&auto=true&query=" + encodeURIComponent(p.permit != null ? String(p.permit) : (p.matched_name || p.query || ""));
   const linkrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${p.cert_url ? `<a href="${esc(p.cert_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>` : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
@@ -455,7 +464,7 @@ function siiBody(p, ri, pi){
     ? `<div class="confirmrow ok">✔ אומת ידנית מול המאגר <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>`
     : `<div class="confirmrow"><span class="ask">התוצאה נכונה?</span><button class="vbtn yes" onclick="confirmCorrect(${ri},${pi})">✓ נכון</button><button class="vbtn no" onclick="startWrong(${ri},${pi})">✗ שגוי</button></div>
       <div class="editbar" id="wrong-eb-${ri}-${pi}"><input id="wrong-in-${ri}-${pi}" type="text" inputmode="numeric" placeholder="מספר היתר נכון מהמאגר"><label><input type="checkbox" id="wrong-nc-${ri}-${pi}"> אין תו תקן</label><button class="save" onclick="saveWrong(${ri},${pi})">שמור</button><button class="cancel" onclick="cancelWrong(${ri},${pi})">ביטול</button></div>`;
-  return `${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}${conf}${ambigPanel}${linkrow}${confirmrow}`;
+  return `${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}${conf}${ambigPanel}${mismatchPanel}${linkrow}${confirmrow}`;
 }
 
 // ---- MII (Made-in-Israel / תוצרת הארץ) body ----
