@@ -426,6 +426,19 @@ function siiBody(p, ri, pi){
   const conf = p.verified
     ? `<div class="conf"><div class="lbl" style="color:var(--green);font-weight:600">✔ תוצאה מאומתת ידנית</div></div>`
     : `<div class="conf"><div class="bar"><div class="fill" style="width:${pct(p.confidence)}%;background:${confColor(p.status)}"></div></div><div class="lbl">רמת התאמה ${pct(p.confidence)}%</div></div>`;
+  // This exact product NAME is registered by 2+ different companies (real
+  // cases: "לוח גבס רגיל", "צמר זכוכית") — each with its own permit. The name
+  // match alone can't tell them apart, so surface every candidate instead of
+  // silently asserting one that might carry the wrong permit.
+  const ambigPanel = (!p.verified && p.ambiguous && (p.candidates||[]).length) ? `
+    <div style="margin-top:10px;padding:10px 12px;background:var(--amber-bg);border:1px solid var(--amber-line);border-radius:10px">
+      <div style="font-weight:600;color:var(--amber);font-size:13px;margin-bottom:6px">⚠ נמצאו כמה יצרנים עם מוצר בשם זה — בחרו את היצרן הנכון</div>
+      ${p.candidates.map((c,ci)=>`
+        <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;padding:6px 0;${ci?"border-top:1px solid var(--amber-line)":""}">
+          <div><b>${esc(c.company||"יצרן לא ידוע")}</b> <span style="color:var(--ink-soft)">· היתר ${esc(String(c.permit??"-"))}</span></div>
+          <button class="vbtn yes" onclick="pickManufacturer(${ri},${pi},${ci})">בחרו</button>
+        </div>`).join("")}
+    </div>` : "";
   const searchUrl = "https://www.sii.org.il/he/certificationssearch?approveType=181&auto=true&query=" + encodeURIComponent(p.permit != null ? String(p.permit) : (p.matched_name || p.query || ""));
   const linkrow = `<div style="margin-top:8px;font-size:13px;display:flex;align-items:center;gap:8px;flex-wrap:wrap">
         ${p.cert_url ? `<a href="${esc(p.cert_url)}" target="_blank" rel="noopener">קישור ישיר לתעודה ↗</a>` : `<span style="color:var(--ink-soft)">אין קישור ישיר</span>`}
@@ -442,7 +455,7 @@ function siiBody(p, ri, pi){
     ? `<div class="confirmrow ok">✔ אומת ידנית מול המאגר <button class="linkbtn" onclick="unconfirm(${ri},${pi})">בטל אימות</button></div>`
     : `<div class="confirmrow"><span class="ask">התוצאה נכונה?</span><button class="vbtn yes" onclick="confirmCorrect(${ri},${pi})">✓ נכון</button><button class="vbtn no" onclick="startWrong(${ri},${pi})">✗ שגוי</button></div>
       <div class="editbar" id="wrong-eb-${ri}-${pi}"><input id="wrong-in-${ri}-${pi}" type="text" inputmode="numeric" placeholder="מספר היתר נכון מהמאגר"><label><input type="checkbox" id="wrong-nc-${ri}-${pi}"> אין תו תקן</label><button class="save" onclick="saveWrong(${ri},${pi})">שמור</button><button class="cancel" onclick="cancelWrong(${ri},${pi})">ביטול</button></div>`;
-  return `${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}${conf}${linkrow}${confirmrow}`;
+  return `${(permit||manuf||matched) ? `<div class="meta">${permit}${matched}${manuf}</div>` : ""}${conf}${ambigPanel}${linkrow}${confirmrow}`;
 }
 
 // ---- MII (Made-in-Israel / תוצרת הארץ) body ----
@@ -564,6 +577,20 @@ window.confirmCorrect = async (ri,pi)=>{
     window.__data[ri].products[pi] = p;
     $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
     recount(); toast("אומת ונשמר");
+  }catch(e){ toast("שגיאה בשמירה"); }
+};
+window.pickManufacturer = async (ri,pi,idx) => {
+  const p = {...window.__data[ri].products[pi]};
+  const c = (p.candidates||[])[idx];
+  if(!c) return;
+  p.status = "approved"; p.confidence = 1; p.permit = c.permit; p.manufacturer = c.company;
+  p.matched_name = c.matched_name; p.ambiguous = false; p.candidates = [];
+  p.verified = true; p.verified_at = new Date().toISOString();
+  try{
+    await postConfirm({original: p.original_read || p.query, corrected: p.query, record:p});
+    window.__data[ri].products[pi] = p;
+    $(`#it-${ri}-${pi}`).outerHTML = itemHTML(p, ri, pi);
+    recount(); toast("היצרן נבחר ונשמר בזיכרון: "+c.company);
   }catch(e){ toast("שגיאה בשמירה"); }
 };
 window.startLinkEdit  = (ri,pi)=>{ $(`#lk-eb-${ri}-${pi}`).classList.add("show"); const i=$(`#lk-in-${ri}-${pi}`); i.focus(); i.select(); };

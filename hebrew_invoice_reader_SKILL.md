@@ -15,9 +15,9 @@ description: >
 
 ## Your Task
 
-Extract ONLY product names from the delivery note (תעודת משלוח). Return a JSON array of strings — nothing else.
+Extract product names from the delivery note (תעודת משלוח), and — only when clearly identifiable — the manufacturer of each product. Return a JSON array of objects, nothing else.
 
-Each string = one product name, written exactly as it appears in the document, including model codes and grade designations.
+Each object = one product: `{"name": "...", "manufacturer": "..." or null}`. The name is written exactly as it appears in the document, including model codes and grade designations. See "Manufacturer / Company Identification" below for when to fill `manufacturer` and when to leave it `null`.
 
 ## Handling Rotated or Upside-Down Scans
 
@@ -142,6 +142,17 @@ Use these to verify your reading when a name looks unusual:
 - **אחד לבנין** (1labinyan.co.il) — distributes כוחלה, general building materials
 - **LYMA** — their own tile brand
 
+## Manufacturer / Company Identification — Critical
+
+Some product names are registered by MORE THAN ONE manufacturer (e.g. "לוח גבס רגיל" is a real product name used by both אורבונד and טמבורד, each with its own separate certification). When the name alone can't tell them apart, the manufacturer you extract is what lets the certification lookup pick the right one — so accuracy here matters as much as the product name itself.
+
+**Fill `manufacturer` ONLY when a maker name is clearly tied to THAT SPECIFIC product line** — for example the brand name is written directly as part of the product description ("תרמוקיר FL 810" → manufacturer `תרמוקיר`), or the line unambiguously names its maker. Use the brand list above to confirm a name really is a manufacturer.
+
+**Leave `manufacturer` as `null` when:**
+- No maker name appears on that product's own line — do NOT fall back to guessing from the invoice header/letterhead just because a company name is visible somewhere on the page.
+- The visible company is a known **distributor**, not a manufacturer (מנדלסון, אחד לבנין) — a distributor's name is never the answer, even if it's the only company name on the page.
+- You are not confident — a wrong manufacturer is worse than none, because it can point the lookup at the wrong company's certificate. When in doubt, leave it `null` and let a human resolve it.
+
 ## Product Code Pattern Reference
 
 | Pattern | Example | Note |
@@ -185,10 +196,15 @@ From actual delivery notes seen in the field:
 
 ## Output Format
 
-Return ONLY a valid JSON array. No explanation, no markdown fences, no extra text.
+Return ONLY a valid JSON array of objects. No explanation, no markdown fences, no extra text.
 
-["כוחלה 119 לבן", "TAMCRETE MC1", "MOTIF 120G 120*120", "VALSIR 110 45 זית"]
+[
+  {"name": "כוחלה 119 לבן", "manufacturer": null},
+  {"name": "תרמוקיר FL 810", "manufacturer": "תרמוקיר"},
+  {"name": "MOTIF 120G 120*120", "manufacturer": null},
+  {"name": "VALSIR 110 45 זית", "manufacturer": null}
+]
 
 Empty result: []
 
-If the document is unclear in one spot, include your best reading — do not skip the product.
+If the document is unclear in one spot, include your best reading of the name — do not skip the product. `manufacturer` may be `null` on any or all products; it is optional per line, never guessed.

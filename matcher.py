@@ -51,6 +51,18 @@ REVIEW_THRESHOLD = 0.70     # >= this        -> לבדיקה  (surface for human
 MII_THRESHOLD = 0.78        # >= this vs MII -> תוצרת הארץ banner (confident)
 MII_REVIEW_THRESHOLD = 0.70 # >= this (but < MII_THRESHOLD) -> surface candidate
 
+# Some product NAMES are registered by more than one company (113 of 1,103
+# distinct SII names, e.g. "לוח גבס רגיל" under both טמבורד and אורבונד) —
+# each with its own permit. A name-only match can't tell them apart, so:
+TIE_MARGIN = 0.06              # a same-name candidate within this of the top
+                                # score, from a DIFFERENT company, is a genuine
+                                # alternate -> ambiguous, not silently picked
+HINT_RESOLVE_THRESHOLD = 0.35  # a manufacturer hint must score at least this
+                                # against a candidate's company to resolve it
+HINT_MARGIN = 0.15             # the winning candidate must beat the runner-up
+                                # by this much, else the hint itself doesn't
+                                # clearly point at one company
+
 STATUS_APPROVED = "approved"
 STATUS_REVIEW = "review"
 STATUS_NOT_FOUND = "not_found"
@@ -148,6 +160,12 @@ def _tokens(norm_text: str) -> frozenset:
         else:
             out.add(t)
     return frozenset(out)
+
+
+def _company_key(entry) -> str:
+    """Normalized company identity for tie-detection — two DB rows count as
+    the SAME manufacturer only if their company strings normalize alike."""
+    return normalize(entry.get("company") or "")
 
 
 class CertMatcher:
@@ -287,14 +305,50 @@ class CertMatcher:
         return min(1.0, base * penalty)
 
     def _best(self, db, qtok):
-        best, best_s = None, 0.0
+        scored = []
         for entry in db:
             s = self._score(qtok, entry["tokens"])   # pick by selection score
-            if s > best_s:
-                best, best_s = entry, s
-        if best is None:
-            return None, 0.0
-        return best, self._confidence(qtok, best["tokens"])  # report display confidence
+            if s > 0.0:
+                scored.append((s, entry))
+        if not scored:
+            return None, 0.0, []
+        scored.sort(key=lambda x: -x[0])
+        best_s, best = scored[0]
+        # Collect genuine alternates: other entries scoring near the top, from
+        # a DIFFERENT company than the winner (one candidate per company — the
+        # closest-scoring row of theirs). Same-company variants (different
+        # models from the same maker) are NOT alternates, just not the winner.
+        ties, seen = [], {_company_key(best)}
+        for s, e in scored[1:]:
+            if best_s - s > TIE_MARGIN:
+                break
+            ck = _company_key(e)
+            if ck and ck not in seen:
+                ties.append((s, e))
+                seen.add(ck)
+        return best, self._confidence(qtok, best["tokens"]), ties
+
+    def _resolve_by_manufacturer(self, hint, candidates):
+        """candidates: [(score, entry), ...] tied on product name. Try to pick
+        ONE using the human/reader-supplied manufacturer hint. Returns the
+        winning entry, or None if the hint doesn't clearly resolve it (stays
+        ambiguous rather than guessing)."""
+        if not hint:
+            return None
+        htok = self._qtokens(normalize(hint))
+        if not htok:
+            return None
+        scored = []
+        for _, e in candidates:
+            ctok = frozenset(_tokens(normalize(e.get("company") or "")))
+            s = self._score(htok, ctok) if ctok else 0.0
+            scored.append((s, e))
+        scored.sort(key=lambda x: -x[0])
+        if not scored or scored[0][0] < HINT_RESOLVE_THRESHOLD:
+            return None
+        if len(scored) > 1 and scored[0][0] - scored[1][0] < HINT_MARGIN:
+            return None  # hint itself doesn't clearly favor one candidate
+        return scored[0][1]
 
     @staticmethod
     def _separate_links(rec):
@@ -315,15 +369,18 @@ class CertMatcher:
             rec["cert_url"] = None
         return rec
 
-    def match(self, raw_name: str) -> dict:
+    def match(self, raw_name: str, manufacturer_hint: str = None) -> dict:
         qtok = self._qtokens(normalize(raw_name))
         result = {"query": raw_name, "status": STATUS_NOT_FOUND, "confidence": 0.0,
                   "permit": None, "manufacturer": None, "matched_name": None,
                   "cert_url": None, "made_in_israel": False, "mii_confidence": 0.0, "official_url": None,
-                  "mii_status": "none", "mii_matched_name": None}
+                  "mii_status": "none", "mii_matched_name": None,
+                  "ambiguous": False, "candidates": []}
 
         # 1) Learned memory wins outright: exact alias (fixes a repeated misread)
         #    + fuzzy recall (tolerates OCR variance). Human-verified & shared.
+        #    A memorized answer is by definition already resolved — never
+        #    ambiguous, regardless of what the raw DB match would show today.
         if self.memory is not None:
             mem = self.memory.lookup(raw_name, self._confidence)
             if mem:
@@ -335,20 +392,44 @@ class CertMatcher:
         if not qtok:
             return result
 
-        sii_hit, sii_s = self._best(self.sii, qtok)
+        sii_hit, sii_s, sii_ties = self._best(self.sii, qtok)
         if sii_hit:
             result["confidence"] = round(sii_s, 3)
             if sii_s >= REVIEW_THRESHOLD:
-                result["matched_name"] = sii_hit["name"]
-                result["permit"] = sii_hit["permit"]
-                result["manufacturer"] = sii_hit["company"]
-                result["status"] = STATUS_APPROVED if sii_s >= APPROVED_THRESHOLD else STATUS_REVIEW
+                chosen = sii_hit
+                if sii_ties:
+                    # Same product name, 2+ companies. Try the manufacturer
+                    # hint (from the reader or a human edit) to pick one;
+                    # if it doesn't clearly resolve, surface the candidates
+                    # instead of silently asserting a permit that may be wrong.
+                    resolved = self._resolve_by_manufacturer(
+                        manufacturer_hint, [(sii_s, sii_hit)] + sii_ties)
+                    if resolved is not None:
+                        chosen = resolved
+                    else:
+                        result["ambiguous"] = True
+                        result["candidates"] = [
+                            {"company": e.get("company") or "", "permit": e.get("permit"),
+                             "matched_name": e.get("name")}
+                            for _, e in [(sii_s, sii_hit)] + sii_ties
+                        ]
+                result["matched_name"] = chosen["name"]
+                result["permit"] = chosen["permit"]
+                result["manufacturer"] = chosen["company"]
+                result["status"] = (STATUS_APPROVED
+                                     if sii_s >= APPROVED_THRESHOLD and not result["ambiguous"]
+                                     else STATUS_REVIEW)
 
-        mii_hit, mii_s = self._best(self.mii, qtok)
+        mii_hit, mii_s, mii_ties = self._best(self.mii, qtok)
         if mii_hit and mii_s >= MII_REVIEW_THRESHOLD:
             result["mii_confidence"] = round(mii_s, 3)
-            result["mii_matched_name"] = mii_hit["name"]
-            result["official_url"] = mii_hit["url"] or None
+            mii_chosen = mii_hit
+            if mii_ties:  # not observed in practice today (0 MII name collisions), kept for correctness
+                resolved = self._resolve_by_manufacturer(manufacturer_hint, [(mii_s, mii_hit)] + mii_ties)
+                if resolved is not None:
+                    mii_chosen = resolved
+            result["mii_matched_name"] = mii_chosen["name"]
+            result["official_url"] = mii_chosen["url"] or None
             if mii_s >= MII_THRESHOLD:
                 # Confident: assert תוצרת הארץ.
                 result["made_in_israel"] = True
@@ -387,8 +468,17 @@ class CertMatcher:
         """Remove a learned correction (undo)."""
         return self.memory.forget(raw_name) if self.memory is not None else False
 
-    def match_many(self, names):
-        return [self.match(n) for n in names]
+    def match_many(self, items):
+        """items: plain name strings (legacy — /api/match manual re-check), or
+        {"name": ..., "manufacturer": ...} dicts (extraction results, carrying
+        the reader's manufacturer hint for tie-breaking)."""
+        out = []
+        for it in items:
+            if isinstance(it, dict):
+                out.append(self.match(str(it.get("name") or ""), manufacturer_hint=it.get("manufacturer")))
+            else:
+                out.append(self.match(str(it)))
+        return out
 
     @property
     def counts(self):

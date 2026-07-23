@@ -83,7 +83,8 @@ def get_client():
 
 
 _FALLBACK_EXTRACT_PROMPT = """You are reading a Hebrew building materials delivery note (תעודת משלוח) or invoice.
-Extract ONLY the product names. Return a JSON array of strings — nothing else. No explanation, no markdown fences.
+Extract the product names, and the manufacturer of each ONLY when clearly identifiable. Return a JSON array of
+{"name": ..., "manufacturer": ... or null} objects — nothing else. No explanation, no markdown fences.
 
 ═══════════════════════════════════════════════
 STEP 1 — ORIENTATION
@@ -149,12 +150,28 @@ International: SAKRET · TAMCRETE · KNAUF · MAPEI · SIKA/SIKASIL · Murexin �
 Distributors (not products): מנדלסון · אחד לבנין
 
 ═══════════════════════════════════════════════
-OUTPUT — JSON ARRAY ONLY
+STEP 7 — MANUFACTURER (critical: some product NAMES are used by 2+ companies)
 ═══════════════════════════════════════════════
-["כוחלה 119 לבן", "TAMCRETE MC1", "MOTIF 120G 120*120", "VALSIR 110 45 זית", "C2TES2 דבק אריחים"]
+Some products share the exact same name across different manufacturers (e.g. "לוח גבס רגיל" is registered by both
+אורבונד and טמבורד, each with its own certificate) — the manufacturer is what lets the lookup pick the right one.
+Fill "manufacturer" ONLY when a maker name is clearly tied to THAT product's own line (e.g. "תרמוקיר FL 810" ->
+manufacturer "תרמוקיר"). Leave it null if: no maker name appears on that line, the only company visible is a
+distributor (מנדלסון, אחד לבנין — never the answer), or you're not confident. A wrong manufacturer is worse than
+none — never guess from the invoice header alone.
+
+═══════════════════════════════════════════════
+OUTPUT — JSON ARRAY OF OBJECTS ONLY
+═══════════════════════════════════════════════
+[
+  {"name": "כוחלה 119 לבן", "manufacturer": null},
+  {"name": "TAMCRETE MC1", "manufacturer": null},
+  {"name": "MOTIF 120G 120*120", "manufacturer": null},
+  {"name": "VALSIR 110 45 זית", "manufacturer": null},
+  {"name": "תרמוקיר FL 810", "manufacturer": "תרמוקיר"}
+]
 
 Empty result: []
-If a line is unclear, include your best reading — do not skip."""
+If a line is unclear, include your best reading of the name — do not skip. manufacturer may be null on any line."""
 
 
 # The hebrew-invoice-reader Cowork skill is the single source of truth for the
@@ -229,8 +246,9 @@ def is_non_product(name: str) -> bool:
     return False
 
 
-def extract_names(media_type: str, data_b64: str):
-    """Call the model on an image OR a PDF and return product-name strings.
+def extract_products(media_type: str, data_b64: str):
+    """Call the model on an image OR a PDF and return a list of
+    {"name": ..., "manufacturer": ... or None} dicts.
 
     Images use an `image` content block; PDFs use a `document` block, which
     Claude reads natively (both text-based and scanned/visual PDFs) — no
@@ -256,11 +274,14 @@ def extract_names(media_type: str, data_b64: str):
         }],
     )
     text = "".join(b.text for b in msg.content if b.type == "text").strip()
-    return _parse_name_list(text)
+    return _parse_products(text)
 
 
-def _parse_name_list(text: str):
-    """Defensively parse a JSON array of strings out of model output."""
+def _parse_products(text: str):
+    """Defensively parse the model's product list. Accepts an array of
+    {"name": ..., "manufacturer": ...} objects (current format — manufacturer
+    lets the matcher pick the right company when a product name is registered
+    by more than one), or a plain array of strings (older prompt / fallback)."""
     text = text.strip()
     if text.startswith("```"):
         text = text.strip("`")
@@ -270,10 +291,21 @@ def _parse_name_list(text: str):
         text = text[start:end + 1]
     try:
         arr = json.loads(text)
-        return [str(x).strip() for x in arr if str(x).strip()]
     except Exception:
-        # Fall back: treat each non-empty line as a product.
-        return [ln.strip(" -•\t") for ln in text.splitlines() if ln.strip()]
+        # Fall back: treat each non-empty line as a product, no manufacturer.
+        return [{"name": ln.strip(" -•\t"), "manufacturer": None}
+                for ln in text.splitlines() if ln.strip()]
+    out = []
+    for x in arr:
+        if isinstance(x, dict):
+            name = str(x.get("name") or "").strip()
+            manuf = x.get("manufacturer")
+            manuf = str(manuf).strip() or None if manuf else None
+        else:
+            name, manuf = str(x).strip(), None
+        if name:
+            out.append({"name": name, "manufacturer": manuf})
+    return out
 
 
 @app.route("/")
@@ -331,9 +363,9 @@ def extract():
             return entry
         try:
             data_b64 = base64.b64encode(job["data"]).decode("ascii")
-            names = extract_names(job["media_type"], data_b64)
-            names = [n for n in names if not is_non_product(n)]
-            entry["products"] = matcher.match_many(names)
+            products = extract_products(job["media_type"], data_b64)
+            products = [p for p in products if not is_non_product(p["name"])]
+            entry["products"] = matcher.match_many(products)
         except Exception as exc:  # noqa: BLE001 — surface per-file, keep batch alive
             entry["error"] = str(exc)
         return entry
@@ -391,12 +423,15 @@ _PERMIT_OK = re.compile(r"^[0-9][0-9\-/ .]{0,24}$")
 def _validate_record(rec):
     if not isinstance(rec, dict):
         return "רשומה לא תקינה"
-    url = rec.get("official_url")
-    if url not in (None, ""):
-        url = str(url).strip()
-        if not _URL_OK.match(url):
-            return "קישור לא תקין — נדרשת כתובת http(s) ללא רווחים, מרכאות או תווים מיוחדים"
-        rec["official_url"] = url
+    # official_url = MII registry link; cert_url = SII certificate link. Both
+    # are rendered into every user's page, so both must pass the same check.
+    for field in ("official_url", "cert_url"):
+        url = rec.get(field)
+        if url not in (None, ""):
+            url = str(url).strip()
+            if not _URL_OK.match(url):
+                return "קישור לא תקין — נדרשת כתובת http(s) ללא רווחים, מרכאות או תווים מיוחדים"
+            rec[field] = url
     permit = rec.get("permit")
     if permit not in (None, ""):
         p = str(permit).strip()
